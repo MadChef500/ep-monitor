@@ -1,8 +1,5 @@
-[phases.setup]
-nixPkgs = ["python311", "chromium", "nss", "nspr", "atk", "cups", "libdrm", "dbus", "libxkbcommon", "gtk3", "pango", "cairo", "glib", "gdk-pixbuf2"]
-
 [phases.install]
-cmds = ["python3.11 -m venv /app/.venv", "source /app/.venv/bin/activate && pip install --only-binary=:all: greenlet && pip install -r requirements.txt && python -m playwright install chromium"]
+cmds = ["pip install --only-binary=:all: greenlet && pip install -r requirements.txt && python -m playwright install chromium --with-deps"]
 
 [start]
-cmd = "source /app/.venv/bin/activate && python scheduler.py"
+cmd = "python scheduler.py"
