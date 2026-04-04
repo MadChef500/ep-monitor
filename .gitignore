@@ -1,0 +1,8 @@
+.env
+venv/
+venv311/
+__pycache__/
+*.pyc
+scheduler.pid
+scheduler.log
+nohup.out
