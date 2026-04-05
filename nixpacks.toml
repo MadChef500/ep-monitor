@@ -1,9 +1,12 @@
+[variables]
+PLAYWRIGHT_BROWSERS_PATH = "/app/ms-playwright"
+
 [phases.install]
 cmds = [
   "pip install --only-binary=:all: greenlet",
   "pip install -r requirements.txt",
-  "python -m playwright install chromium",
-  "python -m playwright install-deps chromium"
+  "PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright python -m playwright install chromium",
+  "PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright python -m playwright install-deps chromium"
 ]
 
 [start]

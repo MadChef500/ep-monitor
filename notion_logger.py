@@ -9,8 +9,8 @@ import requests
 from datetime import datetime, date
 import pytz
 
-NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-DATABASE_ID = os.environ["NOTION_DATABASE_ID"]
+NOTION_TOKEN = os.environ["NOTION_TOKEN"].strip()
+DATABASE_ID = os.environ["NOTION_DATABASE_ID"].strip()
 
 ET = pytz.timezone("America/New_York")
 
