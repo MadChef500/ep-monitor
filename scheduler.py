@@ -10,6 +10,19 @@ Rules:
   - 9:30 PM ET  → catch-up Non-US run(s) if fewer than 2 non-US completed
 """
 
+import subprocess
+import sys
+
+# Install Playwright Chromium before anything else — Railway (Railpack)
+# overrides Procfile/nixpacks start commands, so this is the only
+# reliable place to ensure the browser exists at runtime.
+print("[Setup] Installing Playwright Chromium...", flush=True)
+subprocess.run(
+    [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+    check=True,
+)
+print("[Setup] Chromium ready.", flush=True)
+
 import asyncio
 import random
 from datetime import datetime
