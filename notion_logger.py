@@ -121,21 +121,13 @@ def get_today_runs() -> list:
 
 
 def _run_type(row: dict) -> str:
-    return (
-        row.get("properties", {})
-        .get("Run Type", {})
-        .get("select", {})
-        .get("name", "")
-    )
+    select = row.get("properties", {}).get("Run Type", {}).get("select")
+    return select.get("name", "") if select else ""
 
 
 def _result(row: dict) -> str:
-    return (
-        row.get("properties", {})
-        .get("Result", {})
-        .get("select", {})
-        .get("name", "")
-    )
+    select = row.get("properties", {}).get("Result", {}).get("select")
+    return select.get("name", "") if select else ""
 
 
 def count_today_runs() -> dict:
