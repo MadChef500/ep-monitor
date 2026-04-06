@@ -3,10 +3,6 @@ runner.py
 One complete monitoring run: MHR roster → EP profile → log to Notion.
 """
 
-import os
-# Must be set before Playwright initializes so it finds the browser
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "/app/ms-playwright")
-
 import asyncio
 import random
 import re
