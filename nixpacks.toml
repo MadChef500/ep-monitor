@@ -10,4 +10,4 @@ cmds = [
 ]
 
 [start]
-cmd = "python scheduler.py"
+cmd = "PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright python scheduler.py"
