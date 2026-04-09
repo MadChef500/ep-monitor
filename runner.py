@@ -70,7 +70,15 @@ async def run_check(run_type: str = "US") -> dict:
     ua = random.choice(USER_AGENTS)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
         context = await browser.new_context(
             user_agent=ua,
             viewport={"width": random.choice([1280, 1366, 1440, 1920]),
@@ -90,7 +98,7 @@ async def run_check(run_type: str = "US") -> dict:
         try:
             # ── Step 1: Load MHR roster ──────────────────────────────────────
             print(f"[Runner] Loading MHR roster…")
-            await page.goto(MHR_URL, wait_until="domcontentloaded", timeout=30_000)
+            await page.goto(MHR_URL, wait_until="domcontentloaded", timeout=60_000)
             await page.wait_for_timeout(random.randint(1_500, 3_000))
             await _slow_scroll(page, steps=3)
 
@@ -187,22 +195,19 @@ async def run_check(run_type: str = "US") -> dict:
                     # Fallback: find the number sitting between the eye icon
                     # and the PROFILE ANALYTICS button via page text
                     page_text = await ep_page.inner_text("body")
-                    # EP uses space as thousands separator: "4 618"
-                    # Look for a standalone number near "profile analytics"
+                    # EP view count is a 4-5 digit number just before
+                    # "PROFILE ANALYTICS". Space is used as thousands separator.
+                    # e.g. "4 651\nPROFILE ANALYTICS"
                     match = re.search(
-                        r'(\d[\d\s,]{1,9})\s*profile\s*analytics',
+                        r'\b(\d[\d ]{1,5}\d)\s*\n?\s*profile\s*analytics',
                         page_text, re.IGNORECASE
                     )
-                    if not match:
-                        # broader: any number right before "PROFILE ANALYTICS"
-                        match = re.search(
-                            r'([\d][\d\s]{0,6}[\d])\s*\n?\s*profile analytics',
-                            page_text, re.IGNORECASE
-                        )
                     if match:
-                        raw = match.group(1).replace(",", "").replace(" ", "")
-                        data["view_count"] = raw.strip()
-                        print(f"[Runner] View count (regex): {data['view_count']}")
+                        raw = match.group(1).replace(" ", "").replace(",", "")
+                        # Sanity check: real view counts are 4-6 digits
+                        if 1000 <= int(raw) <= 999999:
+                            data["view_count"] = raw
+                            print(f"[Runner] View count (regex): {data['view_count']}")
                     else:
                         print("[Runner] View count not found.")
             except Exception as e:
