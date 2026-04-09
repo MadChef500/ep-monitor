@@ -20,6 +20,16 @@ ET = pytz.timezone("America/New_York")
 MHR_URL = "https://myhockeyrankings.com/team-info/3748/2025/roster"
 PLAYER_NAME = "Michael DiPalma"
 
+# Browser locale/timezone profiles per country
+COUNTRY_PROFILES = {
+    "Canada":    {"locale": "en-CA", "timezone_id": "America/Toronto",   "lang": "en-CA,en;q=0.9"},
+    "UK":        {"locale": "en-GB", "timezone_id": "Europe/London",     "lang": "en-GB,en;q=0.9"},
+    "Russia":    {"locale": "ru-RU", "timezone_id": "Europe/Moscow",     "lang": "ru-RU,ru;q=0.9,en;q=0.8"},
+    "Sweden":    {"locale": "sv-SE", "timezone_id": "Europe/Stockholm",  "lang": "sv-SE,sv;q=0.9,en;q=0.8"},
+    "Finland":   {"locale": "fi-FI", "timezone_id": "Europe/Helsinki",   "lang": "fi-FI,fi;q=0.9,en;q=0.8"},
+    "Czech":     {"locale": "cs-CZ", "timezone_id": "Europe/Prague",     "lang": "cs-CZ,cs;q=0.9,en;q=0.8"},
+}
+
 # Realistic desktop user-agents (rotated per run)
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -51,23 +61,29 @@ async def run_check(run_type: str = "US") -> dict:
     now = datetime.now(ET)
     start_ts = time.time()
 
+    profile = COUNTRY_PROFILES.get(run_type, None)
+    is_intl = profile is not None
+    location_label = run_type if is_intl else "US"
+
     data = {
         "traffic_source":        "MHR roster → EP",
         "search_phrase":         "MHR roster → EP",
         "search_engine":         "Direct",
-        "search_location":       "Non-US" if run_type == "Non-US" else "US",
+        "search_location":       location_label,
         "profile_found":         False,
         "ep_url":                "",
         "analytics_opened":      False,
         "blocked":               False,
         "view_count":            "N/A",
         "session_duration":      0,
-        "run_type":              run_type,
+        "run_type":              "Non-US" if is_intl else "US",
         "result":                "Failed",
-        "notes":                 "",
+        "notes":                 f"Country: {run_type}. " if is_intl else "",
     }
 
     ua = random.choice(USER_AGENTS)
+    locale     = profile["locale"]      if is_intl else "en-US"
+    timezone   = profile["timezone_id"] if is_intl else "America/New_York"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -83,8 +99,8 @@ async def run_check(run_type: str = "US") -> dict:
             user_agent=ua,
             viewport={"width": random.choice([1280, 1366, 1440, 1920]),
                       "height": random.choice([768, 800, 900, 1080])},
-            locale="en-US",
-            timezone_id="America/New_York",
+            locale=locale,
+            timezone_id=timezone,
             java_script_enabled=True,
         )
 

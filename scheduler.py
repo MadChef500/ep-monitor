@@ -4,10 +4,10 @@ Builds a fresh randomized daily schedule and fires the monitoring runs.
 
 Rules:
   - 8–14 runs/day at randomized times between 7:00 AM and 7:30 PM ET
-  - At least 2 runs tagged "Non-US" each day
+  - 3–4 international runs/day from rotating countries (Canada weighted)
   - 8:00 PM ET  → end-of-day summary posted to Notion
   - 9:00 PM ET  → alert if fewer than 8 runs completed today
-  - 9:30 PM ET  → catch-up Non-US run(s) if fewer than 2 non-US completed
+  - 9:30 PM ET  → catch-up international run(s) if fewer than 3 completed
 """
 
 import subprocess
@@ -45,13 +45,17 @@ scheduler = BlockingScheduler(timezone=ET)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+# Countries to rotate through — Canada weighted 2x so it appears most often
+INTL_COUNTRIES = ["Canada", "Canada", "UK", "Russia", "Sweden", "Finland", "Czech"]
+
+
 def _run_sync(run_type: str = "US") -> None:
     """Synchronous wrapper so APScheduler can call the async runner."""
     now_str = datetime.now(ET).strftime("%I:%M %p ET")
     print(f"\n[Scheduler] Firing {run_type} run at {now_str}")
     result = asyncio.run(run_check(run_type))
     _today_counts["total"] += 1
-    if run_type == "Non-US":
+    if run_type != "US":
         _today_counts["non_us"] += 1
     print(f"[Scheduler] Done. In-memory today: {_today_counts}")
 
@@ -66,16 +70,21 @@ def _build_daily_schedule() -> list[dict]:
 
     minutes = sorted(random.sample(range(window_start, window_end), num_runs))
 
-    # Ensure at least 2 non-US slots
-    non_us_indices = set(random.sample(range(num_runs), min(2, num_runs)))
+    # 3–4 international slots, picked from rotating countries (Canada weighted)
+    num_intl = random.randint(3, 4)
+    intl_indices = set(random.sample(range(num_runs), min(num_intl, num_runs)))
+    intl_pool = INTL_COUNTRIES.copy()
+    random.shuffle(intl_pool)
 
+    intl_iter = iter(intl_pool)
     runs = []
     for i, m in enumerate(minutes):
-        runs.append({
-            "hour":     m // 60,
-            "minute":   m % 60,
-            "run_type": "Non-US" if i in non_us_indices else "US",
-        })
+        if i in intl_indices:
+            country = next(intl_iter, random.choice(INTL_COUNTRIES))
+            run_type = country
+        else:
+            run_type = "US"
+        runs.append({"hour": m // 60, "minute": m % 60, "run_type": run_type})
     return runs
 
 
@@ -110,9 +119,10 @@ def schedule_today() -> None:
         )
         added += 1
 
+    intl_count = sum(1 for r in runs if r["run_type"] != "US")
     print(
         f"[Scheduler] Scheduled {added}/{len(runs)} runs for today "
-        f"({sum(1 for r in runs if r['run_type'] == 'Non-US')} non-US)."
+        f"({intl_count} international)."
     )
 
 
@@ -151,21 +161,21 @@ def behind_schedule_alert() -> None:
 
 
 def non_us_catchup() -> None:
-    """9:30 PM ET — run catch-up Non-US check(s) if needed."""
+    """9:30 PM ET — run catch-up international check(s) if needed."""
     try:
         counts = count_today_runs()
-        needed = max(0, 2 - counts["non_us"])
+        needed = max(0, 3 - counts["non_us"])
         if needed > 0:
             msg = (
-                f"Non-US catch-up: {counts['non_us']}/2 non-US runs completed. "
+                f"Non-US catch-up: {counts['non_us']}/3 international runs completed. "
                 f"Running {needed} catch-up run(s) now."
             )
             print(f"[Catch-up] {msg}")
             log_alert(msg)
             for _ in range(needed):
-                _run_sync("Non-US")
+                _run_sync(random.choice(INTL_COUNTRIES))
         else:
-            print(f"[Catch-up Check] Non-US OK: {counts['non_us']} runs.")
+            print(f"[Catch-up Check] International OK: {counts['non_us']} runs.")
     except Exception as e:
         print(f"[Catch-up] Error: {e}")
 
