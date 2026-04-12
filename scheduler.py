@@ -95,6 +95,11 @@ def schedule_today() -> None:
     global _today_counts
     _today_counts = {"total": 0, "non_us": 0}
 
+    # Remove all leftover run jobs from previous day(s) before adding new ones
+    for job in scheduler.get_jobs():
+        if job.id.startswith("run_"):
+            scheduler.remove_job(job.id)
+
     runs = _build_daily_schedule()
     now = datetime.now(ET)
 
