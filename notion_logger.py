@@ -26,10 +26,12 @@ def _text(value: str) -> dict:
 
 
 def get_last_view_count() -> int | None:
-    """Return the most recent logged view count, or None if no prior runs."""
+    """Return the most recent valid logged view count, or None if not found.
+    Looks back up to 50 rows so error-filled days don't hide the real baseline.
+    """
     payload = {
         "sorts": [{"timestamp": "created_time", "direction": "descending"}],
-        "page_size": 10,
+        "page_size": 50,
     }
     resp = requests.post(
         f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
@@ -47,8 +49,12 @@ def get_last_view_count() -> int | None:
             .get("Site Visit Count", {})
             .get("rich_text", [{}])
         )
-        if raw and raw[0].get("text", {}).get("content", "").strip().isdigit():
-            return int(raw[0]["text"]["content"].strip())
+        content = raw[0].get("text", {}).get("content", "").strip() if raw else ""
+        if content.isdigit():
+            count = int(content)
+            # Ignore bogus scrape values (realistic EP view counts: 1k–500k)
+            if 1_000 <= count <= 500_000:
+                return count
     return None
 
 
@@ -63,7 +69,11 @@ def log_run(data: dict) -> dict:
         last = get_last_view_count()
         if last is not None:
             delta = int(view_count_str) - last
-            delta_str = f"+{delta}" if delta >= 0 else str(delta)
+            # If delta is negative or impossibly large, the baseline was bogus
+            if delta < 0 or delta > 200:
+                delta_str = "N/A"
+            else:
+                delta_str = f"+{delta}" if delta >= 0 else str(delta)
         else:
             delta_str = "first run"
 
