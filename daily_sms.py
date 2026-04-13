@@ -110,14 +110,22 @@ def build_summary(rows: list) -> str:
                         stats_lines.append(part.strip())
                 break
 
-    lines = [
-        f"EP Monitor - {yesterday}",
-        f"Views: {latest_views:,}" if latest_views else "Views: N/A",
-        f"New views: +{total_delta}" if total_delta is not None else "New views: N/A",
-        f"{organic_str}",
-        f"Our runs: {success}/{total} success",
-        f"Intl: {intl_str}",
-    ]
+    # Country list one per line
+    country_lines = []
+    for c, n in country_counts.items():
+        country_lines.append(f"  {c} x{n}")
+
+    lines = ["// EP Monitor"]
+    lines.append(f"{yesterday}")
+    lines.append("")
+    lines.append(f"Views: {latest_views:,}" if latest_views else "Views: N/A")
+    lines.append(f"New views: +{total_delta}" if total_delta is not None else "New views: N/A")
+    lines.append(organic_str)
+    lines.append("")
+    lines.append(f"Our runs: {success}/{total} success")
+    if country_lines:
+        lines.append("")
+        lines.extend(country_lines)
 
     if stats_lines:
         lines.append("")
