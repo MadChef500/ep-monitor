@@ -119,7 +119,12 @@ def build_summary(rows: list) -> str:
     lines.append(f"{yesterday}")
     lines.append("")
     lines.append(f"Views: {latest_views:,}" if latest_views else "Views: N/A")
-    lines.append(f"New views: +{total_delta}" if total_delta is not None else "New views: N/A")
+    if total_delta is None:
+        lines.append("New views: N/A")
+    elif total_delta < 0:
+        lines.append("New views: N/A")
+    else:
+        lines.append(f"New views: +{total_delta}")
     lines.append(organic_str)
     lines.append("")
     lines.append(f"Our runs: {success}/{total} success")
@@ -153,10 +158,13 @@ def send_sms(body: str) -> None:
 
 
 def main():
-    print("[SMS] Building daily summary...")
-    rows = get_yesterday_rows()
-    msg = build_summary(rows)
-    send_sms(msg)
+    try:
+        print("[SMS] Building daily summary...")
+        rows = get_yesterday_rows()
+        msg = build_summary(rows)
+        send_sms(msg)
+    except Exception as e:
+        print(f"[SMS] ERROR: {e}")
 
 
 if __name__ == "__main__":
