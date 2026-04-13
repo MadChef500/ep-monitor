@@ -34,6 +34,7 @@ from apscheduler.triggers.date import DateTrigger
 
 from runner import run_check
 from notion_logger import count_today_runs, log_summary, log_alert
+from daily_sms import main as send_daily_sms
 
 ET = pytz.timezone("America/New_York")
 
@@ -202,6 +203,12 @@ def main() -> None:
     )
 
     # Fixed daily jobs
+    scheduler.add_job(
+        send_daily_sms,
+        trigger=CronTrigger(hour=7, minute=0, timezone=ET),
+        id="daily_sms",
+        replace_existing=True,
+    )
     scheduler.add_job(
         end_of_day_summary,
         trigger=CronTrigger(hour=20, minute=0, timezone=ET),
