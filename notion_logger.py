@@ -36,12 +36,10 @@ def _format_stats(stats: list) -> str:
 
 def get_last_view_count() -> int | None:
     """Return the most recent valid logged view count, or None if not found.
-    Looks back up to 50 rows so error-filled days don't hide the real baseline.
+    Fetches up to 100 rows and sorts in Python so we don't rely on Notion's
+    sort order, which can be unreliable.
     """
-    payload = {
-        "sorts": [{"timestamp": "created_time", "direction": "descending"}],
-        "page_size": 50,
-    }
+    payload = {"page_size": 100}
     resp = requests.post(
         f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
         headers=HEADERS,
@@ -49,7 +47,12 @@ def get_last_view_count() -> int | None:
         timeout=15,
     )
     resp.raise_for_status()
-    for row in resp.json().get("results", []):
+    rows = resp.json().get("results", [])
+
+    # Sort newest-first in Python using Notion's created_time field
+    rows.sort(key=lambda r: r.get("created_time", ""), reverse=True)
+
+    for row in rows:
         rt = _run_type(row)
         if rt in ("Summary", "Alert"):
             continue
