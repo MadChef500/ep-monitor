@@ -75,6 +75,7 @@ async def run_check(run_type: str = "US") -> dict:
         "analytics_opened":      False,
         "blocked":               False,
         "view_count":            "N/A",
+        "season_stats":          [],   # list of {team, league, gp, g, a, pts}
         "session_duration":      0,
         "run_type":              "Non-US" if is_intl else "US",
         "result":                "Failed",
@@ -229,7 +230,46 @@ async def run_check(run_type: str = "US") -> dict:
             except Exception as e:
                 data["notes"] += f"View count error: {e}. "
 
-            # ── Step 6: Click Profile Analytics tab ─────────────────────────
+            # ── Step 6: Scrape current season stats ─────────────────────────
+            try:
+                page_text = await ep_page.inner_text("body")
+                current_year = datetime.now(ET).year
+                # EP season format: "2025-26" or "2026-27"
+                season_label = f"{current_year - 1}-{str(current_year)[2:]}" \
+                    if datetime.now(ET).month >= 9 \
+                    else f"{current_year - 1}-{str(current_year)[2:]}"
+
+                stats = []
+                # Find all rows for the current season using regex on page text
+                # Each row looks like: "Team Name  League  GP  G  A  PTS ..."
+                season_pattern = re.compile(
+                    rf'{re.escape(season_label)}.*?(\n.*?)(?=\n\d{{4}}-|\Z)',
+                    re.DOTALL | re.IGNORECASE
+                )
+                season_block = season_pattern.search(page_text)
+                if season_block:
+                    block = season_block.group(0)
+                    # Extract individual stat lines: team, gp, g, a, pts
+                    row_pattern = re.compile(
+                        r'(.+?)\s{2,}(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)',
+                    )
+                    for m in row_pattern.finditer(block):
+                        team = m.group(1).strip()
+                        league = m.group(2).strip()
+                        gp, g, a, pts = m.group(3), m.group(4), m.group(5), m.group(6)
+                        if any(skip in team.lower() for skip in ["playoffs", "postseason"]):
+                            continue
+                        stats.append({
+                            "team": team, "league": league,
+                            "gp": gp, "g": g, "a": a, "pts": pts
+                        })
+                        print(f"[Runner] Stats: {team} {league} {gp}GP {g}G {a}A {pts}PTS")
+
+                data["season_stats"] = stats
+            except Exception as e:
+                data["notes"] += f"Stats error: {e}. "
+
+            # ── Step 7: Click Profile Analytics tab ─────────────────────────
             try:
                 analytics_tab = await ep_page.query_selector(
                     "a:has-text('Profile Analytics'), "

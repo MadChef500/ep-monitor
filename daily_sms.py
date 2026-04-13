@@ -97,6 +97,18 @@ def build_summary(rows: list) -> str:
         country_counts[c] = country_counts.get(c, 0) + 1
     intl_str = ", ".join(f"{c} x{n}" for c, n in country_counts.items()) if country_counts else "None"
 
+    # Pull latest season stats from most recent successful run notes
+    stats_lines = []
+    for row in reversed(rows):
+        if _prop_select(row, "Result") == "Success":
+            notes = _prop_text(row, "Notes")
+            if "Stats:" in notes:
+                # Parse stats lines out of notes
+                for part in notes.split(" | "):
+                    if "GP" in part and "PTS" in part:
+                        stats_lines.append(part.strip())
+                break
+
     lines = [
         f"EP Monitor - {yesterday}",
         f"Views: {latest_views:,}" if latest_views else "Views: N/A",
@@ -105,6 +117,12 @@ def build_summary(rows: list) -> str:
         f"Our runs: {success}/{total} success",
         f"Intl: {intl_str}",
     ]
+
+    if stats_lines:
+        lines.append("")
+        lines.append("2025-26 Stats:")
+        lines.extend(stats_lines)
+
     return "\n".join(lines)
 
 

@@ -22,7 +22,16 @@ HEADERS = {
 
 
 def _text(value: str) -> dict:
-    return {"rich_text": [{"text": {"content": str(value)}}]}
+    return {"rich_text": [{"text": {"content": str(value)[:2000]}}]}
+
+
+def _format_stats(stats: list) -> str:
+    if not stats:
+        return ""
+    lines = ["Stats:"]
+    for s in stats:
+        lines.append(f"{s['team']} | {s['gp']}GP {s['g']}G {s['a']}A {s['pts']}PTS")
+    return " | ".join(lines)
 
 
 def get_last_view_count() -> int | None:
@@ -93,7 +102,7 @@ def log_run(data: dict) -> dict:
         "Session Duration":     {"number": int(data.get("session_duration", 0))},
         "Run Type":             {"select": {"name": data.get("run_type", "US")}},
         "Result":               {"select": {"name": data.get("result", "Unknown")}},
-        "Notes":                _text(data.get("notes", "")),
+        "Notes":                _text(data.get("notes", "") + _format_stats(data.get("season_stats", []))),
     }
 
     payload = {
