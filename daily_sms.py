@@ -13,10 +13,6 @@ ET = pytz.timezone("America/New_York")
 
 NOTION_TOKEN     = os.environ["NOTION_TOKEN"].strip()
 DATABASE_ID      = os.environ["NOTION_DATABASE_ID"].strip()
-TWILIO_SID       = os.environ["TWILIO_ACCOUNT_SID"].strip()
-TWILIO_TOKEN     = os.environ["TWILIO_AUTH_TOKEN"].strip()
-TWILIO_FROM      = os.environ["TWILIO_FROM_NUMBER"].strip()
-TWILIO_TO        = os.environ["TWILIO_TO_NUMBER"].strip()
 
 NOTION_HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
@@ -113,8 +109,12 @@ def build_summary(rows: list) -> str:
 
 
 def send_sms(body: str) -> None:
-    client = Client(TWILIO_SID, TWILIO_TOKEN)
-    client.messages.create(body=body, from_=TWILIO_FROM, to=TWILIO_TO)
+    sid   = os.environ["TWILIO_ACCOUNT_SID"].strip()
+    token = os.environ["TWILIO_AUTH_TOKEN"].strip()
+    from_ = os.environ["TWILIO_FROM_NUMBER"].strip()
+    to    = os.environ["TWILIO_TO_NUMBER"].strip()
+    client = Client(sid, token)
+    client.messages.create(body=body, from_=from_, to=to)
     print(f"[SMS] Sent:\n{body}")
 
 
