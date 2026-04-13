@@ -4,10 +4,11 @@ Sends a 7 AM ET daily text summary of yesterday's EP monitoring results.
 """
 
 import os
+import smtplib
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 import pytz
 import requests
-from twilio.rest import Client
 
 ET = pytz.timezone("America/New_York")
 
@@ -127,13 +128,20 @@ def build_summary(rows: list) -> str:
 
 
 def send_sms(body: str) -> None:
-    sid   = os.environ["TWILIO_ACCOUNT_SID"].strip()
-    token = os.environ["TWILIO_AUTH_TOKEN"].strip()
-    from_ = os.environ["TWILIO_FROM_NUMBER"].strip()
-    to    = os.environ["TWILIO_TO_NUMBER"].strip()
-    client = Client(sid, token)
-    client.messages.create(body=body, from_=from_, to=to)
-    print(f"[SMS] Sent:\n{body}")
+    """Send via T-Mobile email-to-SMS gateway — free, no registration needed."""
+    gmail_user = os.environ["GMAIL_ADDRESS"].strip()
+    gmail_pass = os.environ["GMAIL_APP_PASSWORD"].strip()
+    to_sms     = "2675466472@tmomail.net"
+
+    msg = MIMEText(body)
+    msg["From"]    = gmail_user
+    msg["To"]      = to_sms
+    msg["Subject"] = ""
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(gmail_user, gmail_pass)
+        server.sendmail(gmail_user, to_sms, msg.as_string())
+    print(f"[SMS] Sent via T-Mobile gateway:\n{body}")
 
 
 def main():
