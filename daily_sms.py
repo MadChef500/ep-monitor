@@ -115,7 +115,7 @@ def build_summary(rows: list) -> str:
     for c, n in country_counts.items():
         country_lines.append(f"  {c} x{n}")
 
-    lines = ["// EP Monitor"]
+    lines = ["EP Monitor"]
     lines.append(f"{yesterday}")
     lines.append("")
     lines.append(f"Views: {latest_views:,}" if latest_views else "Views: N/A")
