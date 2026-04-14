@@ -7,7 +7,7 @@ Rules:
   - 3–4 international runs/day from rotating countries (Canada weighted)
   - 8:00 PM ET  → end-of-day summary posted to Notion
   - 9:00 PM ET  → alert if fewer than 8 runs completed today
-  - 9:30 PM ET  → catch-up international run(s) if fewer than 3 completed
+  - 9:30 PM ET  → catch-up international run(s) if fewer than 1 completed
 """
 
 import subprocess
@@ -47,7 +47,7 @@ scheduler = BlockingScheduler(timezone=ET)
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 # Countries to rotate through — Canada weighted 2x so it appears most often
-INTL_COUNTRIES = ["Canada", "Canada", "UK", "Russia", "Sweden", "Finland", "Czech"]
+INTL_COUNTRIES = ["Canada", "Canada", "UK", "Russia", "Sweden", "Finland", "Czech", "Turkey"]
 
 
 def _run_sync(run_type: str = "US") -> None:
@@ -71,8 +71,8 @@ def _build_daily_schedule() -> list[dict]:
 
     minutes = sorted(random.sample(range(window_start, window_end), num_runs))
 
-    # 3–4 international slots, picked from rotating countries (Canada weighted)
-    num_intl = random.randint(3, 4)
+    # 1–2 international slots, picked from rotating countries (Canada weighted)
+    num_intl = random.randint(1, 2)
     intl_indices = set(random.sample(range(num_runs), min(num_intl, num_runs)))
     intl_pool = INTL_COUNTRIES.copy()
     random.shuffle(intl_pool)
@@ -170,10 +170,10 @@ def non_us_catchup() -> None:
     """9:30 PM ET — run catch-up international check(s) if needed."""
     try:
         counts = count_today_runs()
-        needed = max(0, 3 - counts["non_us"])
+        needed = max(0, 1 - counts["non_us"])
         if needed > 0:
             msg = (
-                f"Non-US catch-up: {counts['non_us']}/3 international runs completed. "
+                f"Non-US catch-up: {counts['non_us']}/1 international runs completed. "
                 f"Running {needed} catch-up run(s) now."
             )
             print(f"[Catch-up] {msg}")

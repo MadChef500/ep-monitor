@@ -28,6 +28,7 @@ COUNTRY_PROFILES = {
     "Sweden":    {"locale": "sv-SE", "timezone_id": "Europe/Stockholm",  "lang": "sv-SE,sv;q=0.9,en;q=0.8"},
     "Finland":   {"locale": "fi-FI", "timezone_id": "Europe/Helsinki",   "lang": "fi-FI,fi;q=0.9,en;q=0.8"},
     "Czech":     {"locale": "cs-CZ", "timezone_id": "Europe/Prague",     "lang": "cs-CZ,cs;q=0.9,en;q=0.8"},
+    "Turkey":    {"locale": "tr-TR", "timezone_id": "Europe/Istanbul",   "lang": "tr-TR,tr;q=0.9,en;q=0.8"},
 }
 
 # Realistic desktop user-agents (rotated per run)
