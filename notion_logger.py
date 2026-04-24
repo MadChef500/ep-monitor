@@ -124,8 +124,8 @@ def log_run(data: dict) -> dict:
 
 
 def get_today_runs() -> list:
-    """Return all rows logged today."""
-    today = date.today().strftime("%Y-%m-%d")
+    """Return all rows logged today (ET date)."""
+    today = datetime.now(ET).strftime("%Y-%m-%d")
     payload = {
         "filter": {
             "property": "Date",
