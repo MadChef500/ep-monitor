@@ -18,7 +18,12 @@ from notion_logger import log_run
 ET = pytz.timezone("America/New_York")
 
 MHR_URL = "https://myhockeyrankings.com/team-info/3748/2025/roster"
+SCOUTING_NEWS_URL = "https://www.thescoutingnews.com"
+EP_PROFILE_URL = "https://www.eliteprospects.com/player/956156/michael-dipalma"
 PLAYER_NAME = "Michael DiPalma"
+
+# Traffic sources — weighted: MHR ~85%, ScoutingNews ~15% (~2-3x per week)
+TRAFFIC_SOURCES = ["MHR"] * 17 + ["ScoutingNews"] * 3
 
 # Browser locale/timezone profiles per country
 COUNTRY_PROFILES = {
@@ -66,9 +71,12 @@ async def run_check(run_type: str = "US") -> dict:
     is_intl = profile is not None
     location_label = run_type if is_intl else "US"
 
+    traffic_source = random.choice(TRAFFIC_SOURCES)
+    source_label = "MHR roster → EP" if traffic_source == "MHR" else "ScoutingNews → EP"
+
     data = {
-        "traffic_source":        "MHR roster → EP",
-        "search_phrase":         "MHR roster → EP",
+        "traffic_source":        source_label,
+        "search_phrase":         source_label,
         "search_engine":         "Direct",
         "search_location":       location_label,
         "profile_found":         False,
@@ -114,75 +122,82 @@ async def run_check(run_type: str = "US") -> dict:
         page = await context.new_page()
 
         try:
-            # ── Step 1: Load MHR roster ──────────────────────────────────────
-            print(f"[Runner] Loading MHR roster…")
-            await page.goto(MHR_URL, wait_until="domcontentloaded", timeout=60_000)
-            await page.wait_for_timeout(random.randint(1_500, 3_000))
-            await _slow_scroll(page, steps=3)
-
-            # ── Step 2: Find Michael DiPalma and click his EP link ───────────
-            print(f"[Runner] Searching for {PLAYER_NAME}…")
-
-            # Try row-level selector first
-            ep_link_el = await page.query_selector(
-                f"tr:has-text('{PLAYER_NAME}') a[href*='eliteprospects']"
-            )
-            if not ep_link_el:
-                ep_link_el = await page.query_selector(
-                    f"tr:has-text('{PLAYER_NAME}') a:has-text('EP')"
-                )
-            # Fallback: any EP link near the name on the page
-            if not ep_link_el:
-                name_el = await page.query_selector(f"text={PLAYER_NAME}")
-                if name_el:
-                    await name_el.scroll_into_view_if_needed()
-                    # Walk up to find a sibling/parent EP link
-                    ep_link_el = await page.evaluate_handle(
-                        """el => {
-                            const row = el.closest('tr') || el.parentElement;
-                            return row ? row.querySelector('a[href*="eliteprospects"], a') : null;
-                        }""",
-                        name_el,
-                    )
-                    if ep_link_el:
-                        href = await ep_link_el.get_attribute("href")
-                        if not href or "eliteprospects" not in href:
-                            ep_link_el = None
-
-            if not ep_link_el:
-                data["notes"] += "EP link not found on roster page. "
-                data["result"] = "EP Link Not Found"
-                return data
-
-            await ep_link_el.scroll_into_view_if_needed()
-            await page.wait_for_timeout(random.randint(500, 1_200))
-
-            ep_href = await ep_link_el.get_attribute("href")
-            data["ep_url"] = ep_href or ""
-            data["profile_found"] = True
-            print(f"[Runner] Found EP link: {ep_href}")
-
-            # ── Step 3: Click EP link (preserves MHR referrer) ──────────────
-            # EP links open in a new tab — catch that
-            try:
-                async with context.expect_page(timeout=10_000) as new_page_info:
-                    await ep_link_el.click()
-                ep_page = await new_page_info.value
-                await ep_page.wait_for_load_state("domcontentloaded", timeout=30_000)
-            except Exception:
-                # Fallback: link navigated in same tab
+            if traffic_source == "ScoutingNews":
+                # ── Path A: ScoutingNews → EP ────────────────────────────────
+                print(f"[Runner] Loading ScoutingNews…")
+                await page.goto(SCOUTING_NEWS_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                await _slow_scroll(page, steps=random.randint(2, 4))
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
                 ep_page = page
-                try:
-                    async with page.expect_navigation(
-                        wait_until="domcontentloaded", timeout=30_000
-                    ):
-                        pass
-                except PWTimeout:
-                    pass
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via ScoutingNews: {ep_page.url}")
 
-            await ep_page.wait_for_timeout(random.randint(2_000, 4_000))
-            data["ep_url"] = ep_page.url
-            print(f"[Runner] Landed on EP: {ep_page.url}")
+            else:
+                # ── Path B: MHR roster → EP ──────────────────────────────────
+                print(f"[Runner] Loading MHR roster…")
+                await page.goto(MHR_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(1_500, 3_000))
+                await _slow_scroll(page, steps=3)
+
+                # ── Step 2: Find Michael DiPalma and click his EP link ───────
+                print(f"[Runner] Searching for {PLAYER_NAME}…")
+                ep_link_el = await page.query_selector(
+                    f"tr:has-text('{PLAYER_NAME}') a[href*='eliteprospects']"
+                )
+                if not ep_link_el:
+                    ep_link_el = await page.query_selector(
+                        f"tr:has-text('{PLAYER_NAME}') a:has-text('EP')"
+                    )
+                if not ep_link_el:
+                    name_el = await page.query_selector(f"text={PLAYER_NAME}")
+                    if name_el:
+                        await name_el.scroll_into_view_if_needed()
+                        ep_link_el = await page.evaluate_handle(
+                            """el => {
+                                const row = el.closest('tr') || el.parentElement;
+                                return row ? row.querySelector('a[href*="eliteprospects"], a') : null;
+                            }""",
+                            name_el,
+                        )
+                        if ep_link_el:
+                            href = await ep_link_el.get_attribute("href")
+                            if not href or "eliteprospects" not in href:
+                                ep_link_el = None
+
+                if not ep_link_el:
+                    data["notes"] += "EP link not found on roster page. "
+                    data["result"] = "EP Link Not Found"
+                    return data
+
+                await ep_link_el.scroll_into_view_if_needed()
+                await page.wait_for_timeout(random.randint(500, 1_200))
+                ep_href = await ep_link_el.get_attribute("href")
+                data["ep_url"] = ep_href or ""
+                data["profile_found"] = True
+                print(f"[Runner] Found EP link: {ep_href}")
+
+                # ── Step 3: Click EP link ────────────────────────────────────
+                try:
+                    async with context.expect_page(timeout=10_000) as new_page_info:
+                        await ep_link_el.click()
+                    ep_page = await new_page_info.value
+                    await ep_page.wait_for_load_state("domcontentloaded", timeout=30_000)
+                except Exception:
+                    ep_page = page
+                    try:
+                        async with page.expect_navigation(
+                            wait_until="domcontentloaded", timeout=30_000
+                        ):
+                            pass
+                    except PWTimeout:
+                        pass
+
+                await ep_page.wait_for_timeout(random.randint(2_000, 4_000))
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP: {ep_page.url}")
 
             # ── Step 4: Dwell 20–60 s ────────────────────────────────────────
             dwell_s = random.randint(20, 60)

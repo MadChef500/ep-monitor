@@ -71,8 +71,8 @@ def _build_daily_schedule() -> list[dict]:
 
     minutes = sorted(random.sample(range(window_start, window_end), num_runs))
 
-    # 1–2 international slots, picked from rotating countries (Canada weighted)
-    num_intl = random.randint(1, 2)
+    # Exactly 1 international slot per day
+    num_intl = 1
     intl_indices = set(random.sample(range(num_runs), min(num_intl, num_runs)))
     intl_pool = INTL_COUNTRIES.copy()
     random.shuffle(intl_pool)
