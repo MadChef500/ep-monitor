@@ -20,10 +20,19 @@ ET = pytz.timezone("America/New_York")
 MHR_URL = "https://myhockeyrankings.com/team-info/3748/2025/roster"
 SCOUTING_NEWS_URL = "https://www.thescoutingnews.com"
 EP_PROFILE_URL = "https://www.eliteprospects.com/player/956156/michael-dipalma"
+EP_SEARCH_URL = "https://www.eliteprospects.com/search/player?q=Michael+DiPalma"
+GOOGLE_SEARCH_URL = "https://www.google.com/search?q=Michael+DiPalma+hockey+eliteprospects"
 PLAYER_NAME = "Michael DiPalma"
 
-# Traffic sources — weighted: MHR ~85%, ScoutingNews ~15% (~2-3x per week)
-TRAFFIC_SOURCES = ["MHR"] * 17 + ["ScoutingNews"] * 3
+# Traffic sources weighted to mirror Chase Pavlesich's profile breakdown:
+# MHR→Direct ~44%, EP internal ~20%, Google ~15%, ScoutingNews ~5%, rest Direct
+TRAFFIC_SOURCES = (
+    ["MHR"] * 9 +          # ~44% — arrives as Direct/referral from MHR
+    ["EP"] * 4 +            # ~20% — eliteprospects.com internal search
+    ["Google"] * 3 +        # ~15% — google.com search → click EP result
+    ["ScoutingNews"] * 1 +  # ~5%  — thescoutingnews.com referral
+    ["Direct"] * 3          # ~15% — goes straight to EP profile URL
+)
 
 # Browser locale/timezone profiles per country
 COUNTRY_PROFILES = {
@@ -72,7 +81,14 @@ async def run_check(run_type: str = "US") -> dict:
     location_label = run_type if is_intl else "US"
 
     traffic_source = random.choice(TRAFFIC_SOURCES)
-    source_label = "MHR roster → EP" if traffic_source == "MHR" else "ScoutingNews → EP"
+    source_labels = {
+        "MHR":          "MHR roster → EP",
+        "EP":           "EP search → EP",
+        "Google":       "Google → EP",
+        "ScoutingNews": "ScoutingNews → EP",
+        "Direct":       "Direct → EP",
+    }
+    source_label = source_labels.get(traffic_source, "Direct → EP")
 
     data = {
         "traffic_source":        source_label,
@@ -135,8 +151,62 @@ async def run_check(run_type: str = "US") -> dict:
                 data["ep_url"] = ep_page.url
                 print(f"[Runner] Landed on EP via ScoutingNews: {ep_page.url}")
 
-            else:
-                # ── Path B: MHR roster → EP ──────────────────────────────────
+            elif traffic_source == "Direct":
+                # ── Path B: Direct → EP ──────────────────────────────────────
+                print(f"[Runner] Loading EP directly…")
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP directly: {ep_page.url}")
+
+            elif traffic_source == "EP":
+                # ── Path C: EP internal search → profile ─────────────────────
+                print(f"[Runner] Searching EP internally…")
+                await page.goto(EP_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                await _slow_scroll(page, steps=2)
+                # Click first result that matches Michael DiPalma
+                link = await page.query_selector(f"a[href*='michael-dipalma']")
+                if link:
+                    await link.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(random.randint(500, 1_000))
+                    await link.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+                else:
+                    await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via EP search: {ep_page.url}")
+
+            elif traffic_source == "Google":
+                # ── Path D: Google search → EP ───────────────────────────────
+                print(f"[Runner] Searching Google…")
+                await page.goto(GOOGLE_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                await _slow_scroll(page, steps=2)
+                # Click EP result in search results
+                link = await page.query_selector("a[href*='eliteprospects.com/player/956156']")
+                if not link:
+                    link = await page.query_selector("a[href*='michael-dipalma']")
+                if link:
+                    await link.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(random.randint(500, 1_200))
+                    await link.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+                else:
+                    await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via Google: {ep_page.url}")
+
+            else:  # MHR
+                # ── Path E: MHR roster → EP ──────────────────────────────────
                 print(f"[Runner] Loading MHR roster…")
                 await page.goto(MHR_URL, wait_until="domcontentloaded", timeout=60_000)
                 await page.wait_for_timeout(random.randint(1_500, 3_000))

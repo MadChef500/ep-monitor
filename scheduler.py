@@ -3,7 +3,7 @@ scheduler.py
 Builds a fresh randomized daily schedule and fires the monitoring runs.
 
 Rules:
-  - 8–14 runs/day at randomized times between 7:00 AM and 7:30 PM ET
+  - 7–12 runs/day at randomized times between 7:00 AM and 7:30 PM ET
   - 3–4 international runs/day from rotating countries (Canada weighted)
   - 8:00 PM ET  → end-of-day summary posted to Notion
   - 9:00 PM ET  → alert if fewer than 8 runs completed today
@@ -63,7 +63,7 @@ def _run_sync(run_type: str = "US") -> None:
 
 def _build_daily_schedule() -> list[dict]:
     """Return a list of {hour, minute, run_type} dicts for today."""
-    num_runs = random.randint(8, 14)
+    num_runs = random.randint(7, 12)
 
     # Window: 7:00 AM–7:30 PM ET (750 minutes)
     window_start = 7 * 60        # 420
