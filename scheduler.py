@@ -233,7 +233,23 @@ def main() -> None:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
         print("[Scheduler] Stopped.")
+    except Exception as e:
+        print(f"[Scheduler] CRASHED: {e}")
+        raise
 
 
 if __name__ == "__main__":
-    main()
+    import time as _time
+    while True:
+        try:
+            main()
+        except (KeyboardInterrupt, SystemExit):
+            break
+        except Exception as e:
+            print(f"[Scheduler] Restarting after crash: {e}")
+            _time.sleep(30)
+            # Re-install Chromium in case it was the cause
+            subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+                check=False,
+            )
