@@ -24,14 +24,13 @@ EP_SEARCH_URL = "https://www.eliteprospects.com/search/player?q=Michael+DiPalma"
 GOOGLE_SEARCH_URL = "https://www.google.com/search?q=Michael+DiPalma+hockey+eliteprospects"
 PLAYER_NAME = "Michael DiPalma"
 
-# Traffic sources weighted to mirror Chase Pavlesich's profile breakdown:
-# MHR→Direct ~44%, EP internal ~20%, Google ~15%, ScoutingNews ~5%, rest Direct
+# Traffic sources — Google removed (blocks automated browsers, causes crashes)
+# MHR ~50%, EP internal ~20%, Direct ~25%, ScoutingNews ~5%
 TRAFFIC_SOURCES = (
-    ["MHR"] * 9 +          # ~44% — arrives as Direct/referral from MHR
-    ["EP"] * 4 +            # ~20% — eliteprospects.com internal search
-    ["Google"] * 3 +        # ~15% — google.com search → click EP result
-    ["ScoutingNews"] * 1 +  # ~5%  — thescoutingnews.com referral
-    ["Direct"] * 3          # ~15% — goes straight to EP profile URL
+    ["MHR"] * 10 +          # ~50% — arrives as referral from MHR
+    ["EP"] * 4 +             # ~20% — eliteprospects.com internal search
+    ["ScoutingNews"] * 1 +   # ~5%  — thescoutingnews.com referral
+    ["Direct"] * 5           # ~25% — goes straight to EP profile URL
 )
 
 # Browser locale/timezone profiles per country
