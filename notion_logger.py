@@ -6,7 +6,7 @@ Handles all Notion API interactions for the EP Monitor.
 import os
 import re
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import pytz
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"].strip()
@@ -35,11 +35,15 @@ def _format_stats(stats: list) -> str:
 
 
 def get_last_view_count() -> int | None:
-    """Return the most recent valid logged view count, or None if not found.
-    Fetches up to 100 rows and sorts in Python so we don't rely on Notion's
-    sort order, which can be unreliable.
+    """Return the most recent valid logged view count from the last 7 days.
+    Filters by date first so we never miss recent rows due to page_size limits.
     """
-    payload = {"page_size": 100}
+    week_ago = (datetime.now(ET) - timedelta(days=7)).strftime("%Y-%m-%d")
+    payload = {
+        "filter": {"property": "Date", "date": {"on_or_after": week_ago}},
+        "sorts": [{"timestamp": "created_time", "direction": "descending"}],
+        "page_size": 100,
+    }
     resp = requests.post(
         f"https://api.notion.com/v1/databases/{DATABASE_ID}/query",
         headers=HEADERS,
@@ -49,7 +53,7 @@ def get_last_view_count() -> int | None:
     resp.raise_for_status()
     rows = resp.json().get("results", [])
 
-    # Sort newest-first in Python using Notion's created_time field
+    # Also sort in Python as a safety net
     rows.sort(key=lambda r: r.get("created_time", ""), reverse=True)
 
     for row in rows:
@@ -64,7 +68,6 @@ def get_last_view_count() -> int | None:
         content = raw[0].get("text", {}).get("content", "").strip() if raw else ""
         if content.isdigit():
             count = int(content)
-            # Ignore bogus scrape values (realistic EP view counts: 1k–500k)
             if 1_000 <= count <= 500_000:
                 return count
     return None
