@@ -202,30 +202,35 @@ def main() -> None:
         replace_existing=True,
     )
 
-    # Fixed daily jobs
+    # Fixed daily jobs — misfire_grace_time gives them a 1-hour window so they
+    # still fire even if the service was briefly down at the exact trigger time
     scheduler.add_job(
         send_daily_sms,
         trigger=CronTrigger(hour=7, minute=0, timezone=ET),
         id="daily_sms",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         end_of_day_summary,
         trigger=CronTrigger(hour=20, minute=0, timezone=ET),
         id="summary",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         behind_schedule_alert,
         trigger=CronTrigger(hour=21, minute=0, timezone=ET),
         id="behind_alert",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         non_us_catchup,
         trigger=CronTrigger(hour=21, minute=30, timezone=ET),
         id="non_us_catchup",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     print("[Scheduler] All jobs registered. Running…")
