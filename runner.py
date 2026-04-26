@@ -294,19 +294,21 @@ async def run_check(run_type: str = "US") -> dict:
                     data["view_count"] = raw.strip().replace(",", "").replace(" ", "")
                     print(f"[Runner] View count (element): {data['view_count']}")
                 else:
-                    # Fallback: find the number sitting between the eye icon
-                    # and the PROFILE ANALYTICS button via page text
+                    # Fallback: scan page text for view count near "PROFILE ANALYTICS"
                     page_text = await ep_page.inner_text("body")
-                    # EP view count is a 4-5 digit number just before
-                    # "PROFILE ANALYTICS". Space is used as thousands separator.
-                    # e.g. "4 651\nPROFILE ANALYTICS"
+                    # Log a snippet around "profile analytics" for debugging
+                    idx = page_text.lower().find("profile analytics")
+                    if idx >= 0:
+                        snippet = page_text[max(0, idx-60):idx+40].replace("\n", "↵")
+                        print(f"[Runner] Near 'profile analytics': ...{snippet}...")
+                    else:
+                        print("[Runner] 'profile analytics' text not found on page.")
                     match = re.search(
                         r'\b(\d[\d ]{1,5}\d)\s*\n?\s*profile\s*analytics',
                         page_text, re.IGNORECASE
                     )
                     if match:
                         raw = match.group(1).replace(" ", "").replace(",", "")
-                        # Sanity check: real view counts are 4-6 digits
                         if 1000 <= int(raw) <= 999999:
                             data["view_count"] = raw
                             print(f"[Runner] View count (regex): {data['view_count']}")
