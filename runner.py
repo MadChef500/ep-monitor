@@ -284,17 +284,22 @@ async def run_check(run_type: str = "US") -> dict:
                 data["ep_url"] = ep_page.url
 
             # ── Step 5: Scrape view count ───────────────────────────────────
-            # The count sits right before the "PROFILE ANALYTICS" button on
-            # the player's main profile page. That's the only place we trust.
+            # The count sits near the "PROFILE ANALYTICS" button. Wait for
+            # the page to fully render before grabbing the text.
             try:
+                try:
+                    await ep_page.wait_for_load_state("networkidle", timeout=10_000)
+                except Exception:
+                    pass  # timeout is fine — scrape whatever is rendered
+                await ep_page.wait_for_timeout(2_000)  # extra JS render buffer
+
                 page_text = await ep_page.inner_text("body")
 
-                # Find ALL numbers preceding "PROFILE ANALYTICS" (could appear
-                # multiple times if there are duplicate sections), pick first
-                # one that's in the realistic view-count range (1k–500k).
                 view_count = None
+
+                # Pattern 1 — number BEFORE "Profile Analytics" (any whitespace)
                 for m in re.finditer(
-                    r'(\d[\d ,]{2,7}\d)\s*\n?\s*profile\s*analytics',
+                    r'(\d[\d ,]{2,7}\d)\s+profile\s+analytics',
                     page_text, re.IGNORECASE,
                 ):
                     raw = m.group(1).replace(" ", "").replace(",", "")
@@ -302,18 +307,56 @@ async def run_check(run_type: str = "US") -> dict:
                         view_count = raw
                         break
 
+                # Pattern 2 — number AFTER "Profile Analytics" (layout flip)
+                if not view_count:
+                    for m in re.finditer(
+                        r'profile\s+analytics\s+(\d[\d ,]{2,7}\d)',
+                        page_text, re.IGNORECASE,
+                    ):
+                        raw = m.group(1).replace(" ", "").replace(",", "")
+                        if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                            view_count = raw
+                            break
+
+                # Pattern 3 — JS DOM query (catches cases where inner_text
+                # collapses/reorders whitespace differently than the regex expects)
+                if not view_count:
+                    try:
+                        count_js = await ep_page.evaluate("""
+                            () => {
+                                const body = document.body.innerText || '';
+                                const idx = body.toLowerCase().indexOf('profile analytics');
+                                if (idx < 0) return null;
+                                const before = body.slice(Math.max(0, idx - 250), idx);
+                                const after  = body.slice(idx, idx + 250);
+                                const mB = before.match(/(\\d[\\d, ]{2,8}\\d)\\s*$/);
+                                if (mB) return mB[1];
+                                const mA = after.match(/profile analytics[^\\d]{0,30}(\\d[\\d, ]{2,8}\\d)/i);
+                                if (mA) return mA[1];
+                                return null;
+                            }
+                        """)
+                        if count_js:
+                            raw = str(count_js).replace(" ", "").replace(",", "")
+                            if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                                view_count = raw
+                                print(f"[Runner] View count via JS fallback: {view_count}")
+                    except Exception as js_err:
+                        print(f"[Runner] JS view count query failed: {js_err}")
+
                 if view_count:
                     data["view_count"] = view_count
                     print(f"[Runner] View count: {view_count}")
                 else:
-                    # Log debug snippet so we can see what changed if EP
-                    # restructures the page
+                    # Detailed debug so we can see exactly what EP is returning
                     idx = page_text.lower().find("profile analytics")
                     if idx >= 0:
-                        snippet = page_text[max(0, idx-100):idx+30].replace("\n", "↵")
+                        snippet = page_text[max(0, idx - 150):idx + 50].replace("\n", "↵")
                         print(f"[Runner] View count not found. Near marker: ...{snippet}...")
                     else:
+                        preview = page_text[:600].replace("\n", "↵")
                         print(f"[Runner] 'PROFILE ANALYTICS' not on page. URL: {ep_page.url}")
+                        print(f"[Runner] Page preview: {preview}")
             except Exception as e:
                 data["notes"] += f"View count error: {e}. "
                 print(f"[Runner] View count exception: {e}")
