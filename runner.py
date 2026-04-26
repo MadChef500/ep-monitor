@@ -276,65 +276,44 @@ async def run_check(run_type: str = "US") -> dict:
             await _slow_scroll(ep_page, steps=random.randint(2, 5))
             await ep_page.wait_for_timeout((dwell_s - half) * 1_000)
 
-            # ── Step 5: Scrape view count — try multiple strategies ─────────
-            try:
-                # Wait for network to settle so JS-rendered content appears
-                try:
-                    await ep_page.wait_for_load_state("networkidle", timeout=10_000)
-                except PWTimeout:
-                    pass
+            # ── Verify we're on the profile page ────────────────────────────
+            if "michael-dipalma" not in ep_page.url:
+                print(f"[Runner] Not on profile page (at {ep_page.url}), navigating directly.")
+                await ep_page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await ep_page.wait_for_timeout(3_000)
+                data["ep_url"] = ep_page.url
 
+            # ── Step 5: Scrape view count ───────────────────────────────────
+            # The count sits right before the "PROFILE ANALYTICS" button on
+            # the player's main profile page. That's the only place we trust.
+            try:
                 page_text = await ep_page.inner_text("body")
 
-                # Debug: log what's near key markers so we can see EP's current layout
-                for marker in ["profile analytics", "views", "page views"]:
-                    idx = page_text.lower().find(marker)
-                    if idx >= 0:
-                        snippet = page_text[max(0, idx-80):idx+50].replace("\n", "↵")
-                        print(f"[Runner] Near '{marker}': ...{snippet}...")
+                # Find ALL numbers preceding "PROFILE ANALYTICS" (could appear
+                # multiple times if there are duplicate sections), pick first
+                # one that's in the realistic view-count range (1k–500k).
+                view_count = None
+                for m in re.finditer(
+                    r'(\d[\d ,]{2,7}\d)\s*\n?\s*profile\s*analytics',
+                    page_text, re.IGNORECASE,
+                ):
+                    raw = m.group(1).replace(" ", "").replace(",", "")
+                    if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                        view_count = raw
                         break
 
-                # Strategy 1: regex — number before "PROFILE ANALYTICS"
-                match = re.search(
-                    r'\b(\d[\d ,]{1,6}\d)\s*\n?\s*profile\s*analytics',
-                    page_text, re.IGNORECASE
-                )
-                # Strategy 2: regex — number followed by "views" or "page views"
-                if not match:
-                    match = re.search(
-                        r'\b(\d[\d ,]{1,6}\d)\s*\n?\s*(?:page\s*)?views?\b',
-                        page_text, re.IGNORECASE
-                    )
-                # Strategy 3: try any element that might contain the count
-                if not match:
-                    for sel in [
-                        ".ep-icon-eye + span",
-                        "[class*='views'] [class*='count']",
-                        "[class*='view-count']",
-                        "[class*='profile-views']",
-                        "span.total-views",
-                        "[data-testid*='view']",
-                        "[aria-label*='views']",
-                    ]:
-                        el = await ep_page.query_selector(sel)
-                        if el:
-                            txt = (await el.inner_text()).strip()
-                            m = re.search(r'\d[\d ,]{2,6}\d', txt)
-                            if m:
-                                match = m
-                                print(f"[Runner] View count from selector {sel}: {m.group(0)}")
-                                break
-
-                if match:
-                    raw = match.group(1) if match.lastindex else match.group(0)
-                    raw = raw.replace(" ", "").replace(",", "")
-                    if raw.isdigit() and 1000 <= int(raw) <= 999999:
-                        data["view_count"] = raw
-                        print(f"[Runner] View count: {data['view_count']}")
-                    else:
-                        print(f"[Runner] View count out of range: {raw}")
+                if view_count:
+                    data["view_count"] = view_count
+                    print(f"[Runner] View count: {view_count}")
                 else:
-                    print("[Runner] View count not found by any strategy.")
+                    # Log debug snippet so we can see what changed if EP
+                    # restructures the page
+                    idx = page_text.lower().find("profile analytics")
+                    if idx >= 0:
+                        snippet = page_text[max(0, idx-100):idx+30].replace("\n", "↵")
+                        print(f"[Runner] View count not found. Near marker: ...{snippet}...")
+                    else:
+                        print(f"[Runner] 'PROFILE ANALYTICS' not on page. URL: {ep_page.url}")
             except Exception as e:
                 data["notes"] += f"View count error: {e}. "
                 print(f"[Runner] View count exception: {e}")
