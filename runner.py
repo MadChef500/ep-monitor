@@ -284,79 +284,138 @@ async def run_check(run_type: str = "US") -> dict:
                 data["ep_url"] = ep_page.url
 
             # ── Step 5: Scrape view count ───────────────────────────────────
-            # The count sits near the "PROFILE ANALYTICS" button. Wait for
-            # the page to fully render before grabbing the text.
             try:
                 try:
-                    await ep_page.wait_for_load_state("networkidle", timeout=10_000)
+                    await ep_page.wait_for_load_state("networkidle", timeout=15_000)
                 except Exception:
-                    pass  # timeout is fine — scrape whatever is rendered
-                await ep_page.wait_for_timeout(2_000)  # extra JS render buffer
-
-                page_text = await ep_page.inner_text("body")
+                    pass
+                await ep_page.wait_for_timeout(3_000)
 
                 view_count = None
 
-                # Pattern 1 — number BEFORE "Profile Analytics" (any whitespace)
-                for m in re.finditer(
-                    r'(\d[\d ,]{2,7}\d)\s+profile\s+analytics',
-                    page_text, re.IGNORECASE,
-                ):
-                    raw = m.group(1).replace(" ", "").replace(",", "")
-                    if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
-                        view_count = raw
-                        break
+                # ── Strategy A: JS DOM tree walker (most reliable) ───────────
+                # Walks every text node in the document, finds one that says
+                # "Profile Analytics", then checks nearby nodes and parent
+                # elements for a number in the valid range.
+                try:
+                    count_js = await ep_page.evaluate("""
+                        () => {
+                            function clean(s) {
+                                return s.replace(/[,.  ]/g, '');
+                            }
+                            function inRange(n) { return n >= 1000 && n <= 500000; }
 
-                # Pattern 2 — number AFTER "Profile Analytics" (layout flip)
-                if not view_count:
-                    for m in re.finditer(
-                        r'profile\s+analytics\s+(\d[\d ,]{2,7}\d)',
-                        page_text, re.IGNORECASE,
-                    ):
-                        raw = m.group(1).replace(" ", "").replace(",", "")
+                            // Collect all visible text nodes
+                            const walker = document.createTreeWalker(
+                                document.body, NodeFilter.SHOW_TEXT, null
+                            );
+                            const nodes = [];
+                            let node;
+                            while ((node = walker.nextNode())) nodes.push(node);
+
+                            for (let i = 0; i < nodes.length; i++) {
+                                if (!/profile analytics/i.test(nodes[i].textContent.trim())) continue;
+
+                                // Check up to 6 text nodes before and after
+                                for (let d = -6; d <= 6; d++) {
+                                    if (d === 0) continue;
+                                    const idx = i + d;
+                                    if (idx < 0 || idx >= nodes.length) continue;
+                                    const candidate = clean(nodes[idx].textContent.trim());
+                                    if (/^\\d{4,6}$/.test(candidate) && inRange(parseInt(candidate))) {
+                                        return candidate;
+                                    }
+                                }
+
+                                // Walk up 5 ancestor elements and search their full text
+                                let el = nodes[i].parentElement;
+                                for (let up = 0; up < 5 && el; up++, el = el.parentElement) {
+                                    const full = el.textContent || '';
+                                    const ms = full.match(/(\\d[\\d,]{3,6})/g) || [];
+                                    for (const candidate of ms) {
+                                        const n = parseInt(clean(candidate));
+                                        if (inRange(n)) return String(n);
+                                    }
+                                }
+                            }
+
+                            // Fallback: any element whose href contains "analytics"
+                            for (const link of document.querySelectorAll('[href*="analytics"]')) {
+                                let container = link.parentElement;
+                                for (let up = 0; up < 4 && container; up++, container = container.parentElement) {
+                                    const ms = (container.textContent || '').match(/(\\d[\\d,]{3,6})/g) || [];
+                                    for (const c of ms) {
+                                        const n = parseInt(clean(c));
+                                        if (inRange(n)) return String(n);
+                                    }
+                                }
+                            }
+
+                            return null;
+                        }
+                    """)
+                    if count_js:
+                        raw = str(count_js).replace(",", "").replace(" ", "")
                         if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
                             view_count = raw
-                            break
+                            print(f"[Runner] View count (DOM): {view_count}")
+                except Exception as js_err:
+                    print(f"[Runner] JS DOM query failed: {js_err}")
 
-                # Pattern 3 — JS DOM query (catches cases where inner_text
-                # collapses/reorders whitespace differently than the regex expects)
+                # ── Strategy B: raw HTML regex ───────────────────────────────
+                # EP may render the count in a data-attribute or structured tag
+                # that inner_text doesn't expose cleanly.
                 if not view_count:
                     try:
-                        count_js = await ep_page.evaluate("""
-                            () => {
-                                const body = document.body.innerText || '';
-                                const idx = body.toLowerCase().indexOf('profile analytics');
-                                if (idx < 0) return null;
-                                const before = body.slice(Math.max(0, idx - 250), idx);
-                                const after  = body.slice(idx, idx + 250);
-                                const mB = before.match(/(\\d[\\d, ]{2,8}\\d)\\s*$/);
-                                if (mB) return mB[1];
-                                const mA = after.match(/profile analytics[^\\d]{0,30}(\\d[\\d, ]{2,8}\\d)/i);
-                                if (mA) return mA[1];
-                                return null;
-                            }
-                        """)
-                        if count_js:
-                            raw = str(count_js).replace(" ", "").replace(",", "")
+                        html = await ep_page.content()
+                        for m in re.finditer(
+                            r'(\d[\d,]{3,6})[^<]{0,120}analytics|analytics[^<]{0,120}(\d[\d,]{3,6})',
+                            html, re.IGNORECASE,
+                        ):
+                            raw = (m.group(1) or m.group(2) or "").replace(",", "")
                             if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
                                 view_count = raw
-                                print(f"[Runner] View count via JS fallback: {view_count}")
-                    except Exception as js_err:
-                        print(f"[Runner] JS view count query failed: {js_err}")
+                                print(f"[Runner] View count (HTML): {view_count}")
+                                break
+                    except Exception as html_err:
+                        print(f"[Runner] HTML regex failed: {html_err}")
+
+                # ── Strategy C: inner_text regex (original approach) ─────────
+                if not view_count:
+                    try:
+                        page_text = await ep_page.inner_text("body")
+                        for pattern in [
+                            r'(\d[\d ,]{2,7}\d)\s+profile\s+analytics',
+                            r'profile\s+analytics\s+(\d[\d ,]{2,7}\d)',
+                            r'(\d[\d ,]{2,7}\d)[^\n]{0,40}analytics',
+                        ]:
+                            for m in re.finditer(pattern, page_text, re.IGNORECASE):
+                                raw = m.group(1).replace(" ", "").replace(",", "")
+                                if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                                    view_count = raw
+                                    print(f"[Runner] View count (text): {view_count}")
+                                    break
+                            if view_count:
+                                break
+                    except Exception as text_err:
+                        print(f"[Runner] Text regex failed: {text_err}")
 
                 if view_count:
                     data["view_count"] = view_count
-                    print(f"[Runner] View count: {view_count}")
                 else:
-                    # Detailed debug so we can see exactly what EP is returning
-                    idx = page_text.lower().find("profile analytics")
-                    if idx >= 0:
-                        snippet = page_text[max(0, idx - 150):idx + 50].replace("\n", "↵")
-                        print(f"[Runner] View count not found. Near marker: ...{snippet}...")
-                    else:
-                        preview = page_text[:600].replace("\n", "↵")
-                        print(f"[Runner] 'PROFILE ANALYTICS' not on page. URL: {ep_page.url}")
-                        print(f"[Runner] Page preview: {preview}")
+                    # ── Full debug dump so the next failure is self-diagnosing
+                    try:
+                        page_text = await ep_page.inner_text("body")
+                        idx = page_text.lower().find("profile analytics")
+                        if idx >= 0:
+                            snippet = page_text[max(0, idx - 200):idx + 100].replace("\n", "↵")
+                            print(f"[Runner] DEBUG near 'profile analytics': ...{snippet}...")
+                        else:
+                            print(f"[Runner] 'PROFILE ANALYTICS' NOT on page. URL: {ep_page.url}")
+                            print(f"[Runner] Page text (800): {page_text[:800].replace(chr(10), '↵')}")
+                    except Exception:
+                        pass
+
             except Exception as e:
                 data["notes"] += f"View count error: {e}. "
                 print(f"[Runner] View count exception: {e}")
