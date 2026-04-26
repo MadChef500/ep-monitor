@@ -276,46 +276,68 @@ async def run_check(run_type: str = "US") -> dict:
             await _slow_scroll(ep_page, steps=random.randint(2, 5))
             await ep_page.wait_for_timeout((dwell_s - half) * 1_000)
 
-            # ── Step 5: Scrape view count from main profile page ─────────────
-            # The count (e.g. "4 618") is displayed next to the eye icon
-            # on the main profile page, before clicking anything.
+            # ── Step 5: Scrape view count — try multiple strategies ─────────
             try:
-                # EP renders the count as text next to an eye/view icon
-                # Try the element that wraps the eye icon + number
-                count_el = await ep_page.query_selector(
-                    ".ep-icon-eye + span, "
-                    "[class*='views'] [class*='count'], "
-                    "[class*='view-count'], "
-                    "[class*='profile-views'], "
-                    "span.total-views"
-                )
-                if count_el:
-                    raw = await count_el.inner_text()
-                    data["view_count"] = raw.strip().replace(",", "").replace(" ", "")
-                    print(f"[Runner] View count (element): {data['view_count']}")
-                else:
-                    # Fallback: scan page text for view count near "PROFILE ANALYTICS"
-                    page_text = await ep_page.inner_text("body")
-                    # Log a snippet around "profile analytics" for debugging
-                    idx = page_text.lower().find("profile analytics")
+                # Wait for network to settle so JS-rendered content appears
+                try:
+                    await ep_page.wait_for_load_state("networkidle", timeout=10_000)
+                except PWTimeout:
+                    pass
+
+                page_text = await ep_page.inner_text("body")
+
+                # Debug: log what's near key markers so we can see EP's current layout
+                for marker in ["profile analytics", "views", "page views"]:
+                    idx = page_text.lower().find(marker)
                     if idx >= 0:
-                        snippet = page_text[max(0, idx-60):idx+40].replace("\n", "↵")
-                        print(f"[Runner] Near 'profile analytics': ...{snippet}...")
-                    else:
-                        print("[Runner] 'profile analytics' text not found on page.")
+                        snippet = page_text[max(0, idx-80):idx+50].replace("\n", "↵")
+                        print(f"[Runner] Near '{marker}': ...{snippet}...")
+                        break
+
+                # Strategy 1: regex — number before "PROFILE ANALYTICS"
+                match = re.search(
+                    r'\b(\d[\d ,]{1,6}\d)\s*\n?\s*profile\s*analytics',
+                    page_text, re.IGNORECASE
+                )
+                # Strategy 2: regex — number followed by "views" or "page views"
+                if not match:
                     match = re.search(
-                        r'\b(\d[\d ]{1,5}\d)\s*\n?\s*profile\s*analytics',
+                        r'\b(\d[\d ,]{1,6}\d)\s*\n?\s*(?:page\s*)?views?\b',
                         page_text, re.IGNORECASE
                     )
-                    if match:
-                        raw = match.group(1).replace(" ", "").replace(",", "")
-                        if 1000 <= int(raw) <= 999999:
-                            data["view_count"] = raw
-                            print(f"[Runner] View count (regex): {data['view_count']}")
+                # Strategy 3: try any element that might contain the count
+                if not match:
+                    for sel in [
+                        ".ep-icon-eye + span",
+                        "[class*='views'] [class*='count']",
+                        "[class*='view-count']",
+                        "[class*='profile-views']",
+                        "span.total-views",
+                        "[data-testid*='view']",
+                        "[aria-label*='views']",
+                    ]:
+                        el = await ep_page.query_selector(sel)
+                        if el:
+                            txt = (await el.inner_text()).strip()
+                            m = re.search(r'\d[\d ,]{2,6}\d', txt)
+                            if m:
+                                match = m
+                                print(f"[Runner] View count from selector {sel}: {m.group(0)}")
+                                break
+
+                if match:
+                    raw = match.group(1) if match.lastindex else match.group(0)
+                    raw = raw.replace(" ", "").replace(",", "")
+                    if raw.isdigit() and 1000 <= int(raw) <= 999999:
+                        data["view_count"] = raw
+                        print(f"[Runner] View count: {data['view_count']}")
                     else:
-                        print("[Runner] View count not found.")
+                        print(f"[Runner] View count out of range: {raw}")
+                else:
+                    print("[Runner] View count not found by any strategy.")
             except Exception as e:
                 data["notes"] += f"View count error: {e}. "
+                print(f"[Runner] View count exception: {e}")
 
             # ── Step 6: Scrape current season stats ─────────────────────────
             try:
