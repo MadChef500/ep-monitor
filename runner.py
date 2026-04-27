@@ -13,6 +13,14 @@ from datetime import datetime
 import pytz
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
+# playwright-stealth patches the browser to evade Cloudflare/bot detection
+try:
+    from playwright_stealth import stealth_async
+    _HAS_STEALTH = True
+except ImportError:
+    _HAS_STEALTH = False
+    print("[Runner] WARNING: playwright-stealth not installed; running without stealth.")
+
 from notion_logger import log_run
 
 ET = pytz.timezone("America/New_York")
@@ -92,6 +100,89 @@ PAYWALL_KEYWORDS = [
     "subscribe", "premium", "upgrade", "unlock", "paywall",
     "sign up to view", "create a free account", "log in to view",
 ]
+
+
+# ── Stealth init script ─────────────────────────────────────────────────────
+# Applied to every page on context creation to make the headless browser
+# look like a normal Chrome instance. This catches the basic fingerprints
+# Cloudflare checks; playwright-stealth handles the harder ones.
+STEALTH_INIT = """
+// Hide webdriver
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+// Fake plugins (real Chrome has plugins; headless has none)
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+        {name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer'},
+        {name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
+        {name: 'Native Client', filename: 'internal-nacl-plugin'},
+    ],
+});
+
+// Fake languages
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+
+// Fake hardware concurrency (real machines: 4-16)
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+
+// Fake device memory
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+// Patch chrome runtime (headless lacks this)
+if (!window.chrome) {
+    window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}, app: {}};
+}
+
+// Permissions API quirk that detects headless
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => (
+    parameters.name === 'notifications'
+        ? Promise.resolve({state: Notification.permission})
+        : originalQuery(parameters)
+);
+
+// WebGL vendor/renderer (headless gives away "Brian Paul")
+const getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(parameter) {
+    if (parameter === 37445) return 'Intel Inc.';
+    if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+    return getParameter.apply(this, arguments);
+};
+"""
+
+
+async def _wait_for_cloudflare(page, max_wait_s: int = 30) -> bool:
+    """
+    If Cloudflare's challenge page is showing, wait for it to auto-resolve.
+    Returns True if we made it past the challenge, False if still blocked.
+    """
+    start = time.time()
+    while time.time() - start < max_wait_s:
+        try:
+            text = (await page.inner_text("body"))[:500].lower()
+        except Exception:
+            text = ""
+
+        challenge_markers = [
+            "performing security verification",
+            "checking your browser",
+            "verify you are human",
+            "just a moment",
+            "verifying you are human",
+            "ddos protection by cloudflare",
+        ]
+        is_challenge = any(m in text for m in challenge_markers)
+
+        if not is_challenge and len(text) > 100:
+            elapsed = round(time.time() - start, 1)
+            if elapsed > 0.5:
+                print(f"[Cloudflare] Challenge cleared after {elapsed}s.")
+            return True
+
+        await page.wait_for_timeout(2_000)
+
+    print(f"[Cloudflare] Still on challenge page after {max_wait_s}s — blocked.")
+    return False
 
 
 async def _slow_scroll(page, steps: int = 5) -> None:
@@ -357,12 +448,19 @@ async def run_check(run_type: str = "US") -> dict:
             has_touch=is_mobile,
         )
 
-        # Make navigator.webdriver undetectable
-        await context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
+        # Apply stealth fingerprint patches BEFORE any page loads
+        await context.add_init_script(STEALTH_INIT)
 
         page = await context.new_page()
+
+        # Apply playwright-stealth on top — it handles the harder fingerprints
+        # (canvas hash, audio context, broken image dimensions, etc.) that our
+        # init script can't easily reach.
+        if _HAS_STEALTH:
+            try:
+                await stealth_async(page)
+            except Exception as stealth_err:
+                print(f"[Runner] Stealth apply error (continuing): {stealth_err}")
 
         try:
             if traffic_source == "EPApp":
@@ -629,6 +727,23 @@ async def run_check(run_type: str = "US") -> dict:
                 await ep_page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
                 await ep_page.wait_for_timeout(3_000)
                 data["ep_url"] = ep_page.url
+
+            # ── Cloudflare challenge handling ───────────────────────────────
+            cleared = await _wait_for_cloudflare(ep_page, max_wait_s=30)
+            if not cleared:
+                data["blocked"] = True
+                data["notes"] += "Cloudflare challenge did not clear. "
+                # Try one more reload — sometimes a fresh request gets through
+                try:
+                    print("[Runner] Reloading to retry Cloudflare bypass…")
+                    await ep_page.reload(wait_until="domcontentloaded", timeout=60_000)
+                    await ep_page.wait_for_timeout(5_000)
+                    cleared = await _wait_for_cloudflare(ep_page, max_wait_s=20)
+                    if cleared:
+                        data["notes"] += "Cleared on reload. "
+                        data["blocked"] = False
+                except Exception as reload_err:
+                    print(f"[Runner] Reload failed: {reload_err}")
 
             # ── Step 5: Scrape view count (first attempt — on profile page) ─
             view_count, debug_profile = await _scrape_view_count(ep_page, label="profile")
