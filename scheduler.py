@@ -233,6 +233,20 @@ def main() -> None:
         misfire_grace_time=3600,
     )
 
+    # ── Startup SMS recovery ─────────────────────────────────────────────────
+    # misfire_grace_time only fires missed triggers when the scheduler was
+    # ALREADY running. If Railway restarted the process at/after 7 AM (e.g.
+    # for Playwright install ~2 min), APScheduler schedules 7 AM for TOMORROW
+    # instead. Catch that by firing the SMS immediately on startup if we land
+    # inside the 7 AM hour.
+    _now = datetime.now(ET)
+    if 7 <= _now.hour < 8:
+        print(f"[Scheduler] Startup inside 7 AM window ({_now.strftime('%I:%M %p ET')}) — firing SMS now.")
+        try:
+            send_daily_sms()
+        except Exception as sms_err:
+            print(f"[Scheduler] Startup SMS error: {sms_err}")
+
     print("[Scheduler] All jobs registered. Running…")
     try:
         scheduler.start()

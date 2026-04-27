@@ -293,6 +293,58 @@ async def run_check(run_type: str = "US") -> dict:
 
                 view_count = None
 
+                # ── Strategy 0: Next.js / app state extraction ───────────────
+                # EP uses Next.js. The view count is often embedded in
+                # window.__NEXT_DATA__ before any DOM rendering, making this
+                # the fastest and most reliable method.
+                try:
+                    count_next = await ep_page.evaluate("""
+                        () => {
+                            try {
+                                // Method A: window.__NEXT_DATA__
+                                const nd = window.__NEXT_DATA__;
+                                if (nd) {
+                                    const str = JSON.stringify(nd);
+                                    const keys = [
+                                        '"views":', '"viewCount":', '"profileViews":',
+                                        '"analyticsCount":', '"pageViews":', '"totalViews":',
+                                        '"visitCount":', '"visits":',
+                                    ];
+                                    for (const key of keys) {
+                                        const idx = str.indexOf(key);
+                                        if (idx >= 0) {
+                                            const m = str.slice(idx + key.length).match(/^(\\d{4,6})/);
+                                            if (m) {
+                                                const n = parseInt(m[1]);
+                                                if (n >= 1000 && n <= 500000) return String(n);
+                                            }
+                                        }
+                                    }
+                                }
+                                // Method B: any script tag with JSON containing analytics count
+                                for (const script of document.querySelectorAll('script[type="application/json"]')) {
+                                    try {
+                                        const d = JSON.parse(script.textContent);
+                                        const s = JSON.stringify(d);
+                                        const m = s.match(/"(?:views?|viewCount|profileViews|analyticsCount)":(\\d{4,6})/i);
+                                        if (m) {
+                                            const n = parseInt(m[1]);
+                                            if (n >= 1000 && n <= 500000) return String(n);
+                                        }
+                                    } catch(e) {}
+                                }
+                            } catch(e) {}
+                            return null;
+                        }
+                    """)
+                    if count_next:
+                        raw = str(count_next).strip()
+                        if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                            view_count = raw
+                            print(f"[Runner] View count (Next.js state): {view_count}")
+                except Exception as next_err:
+                    print(f"[Runner] Next.js state query failed: {next_err}")
+
                 # ── Strategy A: JS DOM tree walker (most reliable) ───────────
                 # Walks every text node in the document, finds one that says
                 # "Profile Analytics", then checks nearby nodes and parent
