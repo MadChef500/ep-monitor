@@ -21,16 +21,19 @@ MHR_URL = "https://myhockeyrankings.com/team-info/3748/2025/roster"
 SCOUTING_NEWS_URL = "https://www.thescoutingnews.com"
 EP_PROFILE_URL = "https://www.eliteprospects.com/player/956156/michael-dipalma"
 EP_SEARCH_URL = "https://www.eliteprospects.com/search/player?q=Michael+DiPalma"
-GOOGLE_SEARCH_URL = "https://www.google.com/search?q=Michael+DiPalma+hockey+eliteprospects"
+BING_SEARCH_URL = "https://www.bing.com/search?q=Michael+DiPalma+hockey+eliteprospects"
+DDG_SEARCH_URL = "https://duckduckgo.com/?q=Michael+DiPalma+hockey+eliteprospects"
 PLAYER_NAME = "Michael DiPalma"
 
-# Traffic sources — Google removed (blocks automated browsers, causes crashes)
-# MHR ~50%, EP internal ~20%, Direct ~25%, ScoutingNews ~5%
+# Traffic sources — Google removed (blocks automated browsers)
+# MHR ~40%, Direct ~20%, EP internal ~15%, Bing ~10%, DDG ~10%, ScoutingNews ~5%
 TRAFFIC_SOURCES = (
-    ["MHR"] * 10 +          # ~50% — arrives as referral from MHR
-    ["EP"] * 4 +             # ~20% — eliteprospects.com internal search
+    ["MHR"] * 8 +            # ~40% — arrives as referral from MHR roster
+    ["EP"] * 3 +             # ~15% — eliteprospects.com internal search
+    ["Bing"] * 2 +           # ~10% — Bing search → EP
+    ["DDG"] * 2 +            # ~10% — DuckDuckGo search → EP
     ["ScoutingNews"] * 1 +   # ~5%  — thescoutingnews.com referral
-    ["Direct"] * 5           # ~25% — goes straight to EP profile URL
+    ["Direct"] * 4           # ~20% — goes straight to EP profile URL
 )
 
 # Browser locale/timezone profiles per country
@@ -83,6 +86,8 @@ async def run_check(run_type: str = "US") -> dict:
     source_labels = {
         "MHR":          "MHR roster → EP",
         "EP":           "EP search → EP",
+        "Bing":         "Bing → EP",
+        "DDG":          "DuckDuckGo → EP",
         "Google":       "Google → EP",
         "ScoutingNews": "ScoutingNews → EP",
         "Direct":       "Direct → EP",
@@ -181,8 +186,52 @@ async def run_check(run_type: str = "US") -> dict:
                 data["ep_url"] = ep_page.url
                 print(f"[Runner] Landed on EP via EP search: {ep_page.url}")
 
+            elif traffic_source == "Bing":
+                # ── Path D: Bing search → EP ─────────────────────────────────
+                print(f"[Runner] Searching Bing…")
+                await page.goto(BING_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                await _slow_scroll(page, steps=2)
+                link = await page.query_selector("a[href*='eliteprospects.com/player/956156']")
+                if not link:
+                    link = await page.query_selector("a[href*='michael-dipalma']")
+                if link:
+                    await link.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(random.randint(500, 1_200))
+                    await link.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+                else:
+                    await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via Bing: {ep_page.url}")
+
+            elif traffic_source == "DDG":
+                # ── Path E: DuckDuckGo search → EP ──────────────────────────
+                print(f"[Runner] Searching DuckDuckGo…")
+                await page.goto(DDG_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                await _slow_scroll(page, steps=2)
+                link = await page.query_selector("a[href*='eliteprospects.com/player/956156']")
+                if not link:
+                    link = await page.query_selector("a[href*='michael-dipalma']")
+                if link:
+                    await link.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(random.randint(500, 1_200))
+                    await link.click()
+                    await page.wait_for_load_state("domcontentloaded", timeout=30_000)
+                else:
+                    await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via DuckDuckGo: {ep_page.url}")
+
             elif traffic_source == "Google":
-                # ── Path D: Google search → EP ───────────────────────────────
+                # ── Path F: Google search → EP ───────────────────────────────
                 print(f"[Runner] Searching Google…")
                 await page.goto(GOOGLE_SEARCH_URL, wait_until="domcontentloaded", timeout=60_000)
                 await page.wait_for_timeout(random.randint(2_000, 4_000))
