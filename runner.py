@@ -17,23 +17,31 @@ from notion_logger import log_run
 
 ET = pytz.timezone("America/New_York")
 
-MHR_URL = "https://myhockeyrankings.com/team-info/3748/2025/roster"
+MHR_URL          = "https://myhockeyrankings.com/team-info/3748/2025/roster"
 SCOUTING_NEWS_URL = "https://www.thescoutingnews.com"
-EP_PROFILE_URL = "https://www.eliteprospects.com/player/956156/michael-dipalma"
-EP_SEARCH_URL = "https://www.eliteprospects.com/search/player?q=Michael+DiPalma"
-BING_SEARCH_URL = "https://www.bing.com/search?q=Michael+DiPalma+hockey+eliteprospects"
-DDG_SEARCH_URL = "https://duckduckgo.com/?q=Michael+DiPalma+hockey+eliteprospects"
-PLAYER_NAME = "Michael DiPalma"
+HOCKEYDB_URL      = "https://www.hockeydb.com"
+TWITTER_URL       = "https://x.com/search?q=Michael+DiPalma+hockey&src=typed_query"
+INSTAGRAM_URL     = "https://www.instagram.com/explore/tags/hockeyprospects/"
+EP_PROFILE_URL    = "https://www.eliteprospects.com/player/956156/michael-dipalma"
+EP_SEARCH_URL     = "https://www.eliteprospects.com/search/player?q=Michael+DiPalma"
+BING_SEARCH_URL   = "https://www.bing.com/search?q=Michael+DiPalma+hockey+eliteprospects"
+DDG_SEARCH_URL    = "https://duckduckgo.com/?q=Michael+DiPalma+hockey+eliteprospects"
+PLAYER_NAME       = "Michael DiPalma"
 
-# Traffic sources — Google removed (blocks automated browsers)
-# MHR ~40%, Direct ~20%, EP internal ~15%, Bing ~10%, DDG ~10%, ScoutingNews ~5%
+# Traffic mix — weighted toward EP app + MHR, natural spread across all sources
+# EPApp ~20%, MHR ~20%, Direct ~15%, EP search ~10%, Bing ~10%, DDG ~8%,
+# Twitter ~7%, Instagram ~5%, ScoutingNews ~3%, HockeyDB ~2%
 TRAFFIC_SOURCES = (
-    ["MHR"] * 8 +            # ~40% — arrives as referral from MHR roster
-    ["EP"] * 3 +             # ~15% — eliteprospects.com internal search
-    ["Bing"] * 2 +           # ~10% — Bing search → EP
-    ["DDG"] * 2 +            # ~10% — DuckDuckGo search → EP
-    ["ScoutingNews"] * 1 +   # ~5%  — thescoutingnews.com referral
-    ["Direct"] * 4           # ~20% — goes straight to EP profile URL
+    ["EPApp"]       * 4 +   # ~20% — EP mobile app (iOS/Android deep-link)
+    ["MHR"]         * 4 +   # ~20% — myhockeyrankings.com roster → EP
+    ["Direct"]      * 3 +   # ~15% — direct URL visit
+    ["EP"]          * 2 +   # ~10% — eliteprospects.com internal search
+    ["Bing"]        * 2 +   # ~10% — Bing search → EP
+    ["DDG"]         * 2 +   # ~8%  — DuckDuckGo search → EP
+    ["Twitter"]     * 1 +   # ~7%  — X/Twitter → EP
+    ["Instagram"]   * 1 +   # ~5%  — Instagram → EP
+    ["ScoutingNews"]* 1 +   # ~3%  — thescoutingnews.com → EP
+    ["HockeyDB"]    * 1     # ~2%  — hockeydb.com → EP
 )
 
 # Browser locale/timezone profiles per country
@@ -47,12 +55,37 @@ COUNTRY_PROFILES = {
     "Turkey":    {"locale": "tr-TR", "timezone_id": "Europe/Istanbul",   "lang": "tr-TR,tr;q=0.9,en;q=0.8"},
 }
 
-# Realistic desktop user-agents (rotated per run)
+# Desktop user-agents
 USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+]
+
+# Mobile user-agents (iOS Safari + Android Chrome)
+MOBILE_USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+]
+
+# EP app user-agents — WKWebView on iOS / WebView on Android
+EP_APP_USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/21C66",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20G75",
+    "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/21C66",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.6167.101 Mobile Safari/537.36",
+]
+
+# Mobile viewport sizes
+MOBILE_VIEWPORTS = [
+    {"width": 390, "height": 844},   # iPhone 14
+    {"width": 375, "height": 812},   # iPhone 12 mini
+    {"width": 414, "height": 896},   # iPhone 11
+    {"width": 360, "height": 800},   # Android common
+    {"width": 412, "height": 915},   # Pixel 6
 ]
 
 PAYWALL_KEYWORDS = [
@@ -84,15 +117,23 @@ async def run_check(run_type: str = "US") -> dict:
 
     traffic_source = random.choice(TRAFFIC_SOURCES)
     source_labels = {
+        "EPApp":        "EP app → EP",
         "MHR":          "MHR roster → EP",
+        "Direct":       "Direct → EP",
         "EP":           "EP search → EP",
         "Bing":         "Bing → EP",
         "DDG":          "DuckDuckGo → EP",
-        "Google":       "Google → EP",
+        "Twitter":      "Twitter/X → EP",
+        "Instagram":    "Instagram → EP",
         "ScoutingNews": "ScoutingNews → EP",
-        "Direct":       "Direct → EP",
+        "HockeyDB":     "HockeyDB → EP",
+        "Google":       "Google → EP",
     }
     source_label = source_labels.get(traffic_source, "Direct → EP")
+
+    # EP app and social sources use mobile UA + viewport
+    is_mobile = traffic_source in ("EPApp", "Twitter", "Instagram")
+    is_ep_app = traffic_source == "EPApp"
 
     data = {
         "traffic_source":        source_label,
@@ -111,9 +152,23 @@ async def run_check(run_type: str = "US") -> dict:
         "notes":                 f"Country: {run_type}. " if is_intl else "",
     }
 
-    ua = random.choice(USER_AGENTS)
-    locale     = profile["locale"]      if is_intl else "en-US"
-    timezone   = profile["timezone_id"] if is_intl else "America/New_York"
+    if is_ep_app:
+        ua = random.choice(EP_APP_USER_AGENTS)
+    elif is_mobile:
+        ua = random.choice(MOBILE_USER_AGENTS)
+    else:
+        ua = random.choice(USER_AGENTS)
+
+    if is_mobile:
+        viewport = random.choice(MOBILE_VIEWPORTS)
+    else:
+        viewport = {
+            "width":  random.choice([1280, 1366, 1440, 1920]),
+            "height": random.choice([768, 800, 900, 1080]),
+        }
+
+    locale   = profile["locale"]      if is_intl else "en-US"
+    timezone = profile["timezone_id"] if is_intl else "America/New_York"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -127,11 +182,12 @@ async def run_check(run_type: str = "US") -> dict:
         )
         context = await browser.new_context(
             user_agent=ua,
-            viewport={"width": random.choice([1280, 1366, 1440, 1920]),
-                      "height": random.choice([768, 800, 900, 1080])},
+            viewport=viewport,
             locale=locale,
             timezone_id=timezone,
             java_script_enabled=True,
+            is_mobile=is_mobile,
+            has_touch=is_mobile,
         )
 
         # Make navigator.webdriver undetectable
@@ -142,7 +198,58 @@ async def run_check(run_type: str = "US") -> dict:
         page = await context.new_page()
 
         try:
-            if traffic_source == "ScoutingNews":
+            if traffic_source == "EPApp":
+                # ── Path A: EP app deep-link → profile ───────────────────────
+                # Simulates opening the player profile directly from the EP app.
+                # Uses a mobile/app UA + touch viewport set above.
+                print(f"[Runner] Opening EP app (mobile deep-link)…")
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed via EP app: {ep_page.url}")
+
+            elif traffic_source == "Twitter":
+                # ── Path B: Twitter/X → EP ───────────────────────────────────
+                print(f"[Runner] Loading Twitter/X…")
+                await page.goto(TWITTER_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(3_000, 5_000))
+                await _slow_scroll(page, steps=random.randint(2, 3))
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via Twitter: {ep_page.url}")
+
+            elif traffic_source == "Instagram":
+                # ── Path C: Instagram → EP ───────────────────────────────────
+                print(f"[Runner] Loading Instagram…")
+                await page.goto(INSTAGRAM_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(3_000, 5_000))
+                await _slow_scroll(page, steps=random.randint(2, 3))
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via Instagram: {ep_page.url}")
+
+            elif traffic_source == "HockeyDB":
+                # ── Path D: HockeyDB → EP ────────────────────────────────────
+                print(f"[Runner] Loading HockeyDB…")
+                await page.goto(HOCKEYDB_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 4_000))
+                await _slow_scroll(page, steps=random.randint(2, 3))
+                await page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                await page.wait_for_timeout(random.randint(2_000, 3_500))
+                ep_page = page
+                data["profile_found"] = True
+                data["ep_url"] = ep_page.url
+                print(f"[Runner] Landed on EP via HockeyDB: {ep_page.url}")
+
+            elif traffic_source == "ScoutingNews":
                 # ── Path A: ScoutingNews → EP ────────────────────────────────
                 print(f"[Runner] Loading ScoutingNews…")
                 await page.goto(SCOUTING_NEWS_URL, wait_until="domcontentloaded", timeout=60_000)
@@ -317,13 +424,37 @@ async def run_check(run_type: str = "US") -> dict:
                 data["ep_url"] = ep_page.url
                 print(f"[Runner] Landed on EP: {ep_page.url}")
 
-            # ── Step 4: Dwell 20–60 s ────────────────────────────────────────
+            # ── Step 4: Dwell + optional deep session ────────────────────────
             dwell_s = random.randint(20, 60)
             print(f"[Runner] Dwelling {dwell_s}s…")
             half = dwell_s // 2
             await ep_page.wait_for_timeout(half * 1_000)
             await _slow_scroll(ep_page, steps=random.randint(2, 5))
             await ep_page.wait_for_timeout((dwell_s - half) * 1_000)
+
+            # 30% of runs do a deeper session: click team or league page,
+            # browse briefly, then return to the player profile.
+            # This looks like a scout doing real research.
+            if random.random() < 0.30:
+                try:
+                    deep_link = await ep_page.query_selector(
+                        "a[href*='/team/'], a[href*='/league/'], a[href*='/organization/']"
+                    )
+                    if deep_link:
+                        deep_href = await deep_link.get_attribute("href")
+                        print(f"[Runner] Deep session — clicking: {deep_href}")
+                        await deep_link.scroll_into_view_if_needed()
+                        await ep_page.wait_for_timeout(random.randint(400, 900))
+                        await deep_link.click()
+                        await ep_page.wait_for_load_state("domcontentloaded", timeout=20_000)
+                        await ep_page.wait_for_timeout(random.randint(4_000, 8_000))
+                        await _slow_scroll(ep_page, steps=random.randint(2, 4))
+                        # Navigate back to player profile
+                        await ep_page.goto(EP_PROFILE_URL, wait_until="domcontentloaded", timeout=60_000)
+                        await ep_page.wait_for_timeout(random.randint(2_000, 3_000))
+                        print(f"[Runner] Deep session complete — back on profile.")
+                except Exception as deep_err:
+                    print(f"[Runner] Deep session skipped: {deep_err}")
 
             # ── Verify we're on the profile page ────────────────────────────
             if "michael-dipalma" not in ep_page.url:
