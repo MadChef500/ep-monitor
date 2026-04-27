@@ -101,6 +101,173 @@ async def _slow_scroll(page, steps: int = 5) -> None:
         await page.wait_for_timeout(random.randint(300, 700))
 
 
+async def _scrape_view_count(page, label: str = "profile") -> tuple[str | None, str]:
+    """
+    Try every known strategy to extract the profile view count.
+    Returns (count_str_or_None, debug_snippet_for_notion).
+    """
+    try:
+        try:
+            await page.wait_for_load_state("networkidle", timeout=12_000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(2_000)
+    except Exception:
+        pass
+
+    # Strategy 0: Next.js / app state extraction
+    try:
+        count_next = await page.evaluate("""
+            () => {
+                try {
+                    const nd = window.__NEXT_DATA__;
+                    if (nd) {
+                        const str = JSON.stringify(nd);
+                        const keys = [
+                            '"views":', '"viewCount":', '"profileViews":',
+                            '"analyticsCount":', '"pageViews":', '"totalViews":',
+                            '"visitCount":', '"visits":',
+                        ];
+                        for (const key of keys) {
+                            const idx = str.indexOf(key);
+                            if (idx >= 0) {
+                                const m = str.slice(idx + key.length).match(/^(\\d{4,6})/);
+                                if (m) {
+                                    const n = parseInt(m[1]);
+                                    if (n >= 1000 && n <= 500000) return String(n);
+                                }
+                            }
+                        }
+                    }
+                    for (const script of document.querySelectorAll('script[type="application/json"]')) {
+                        try {
+                            const d = JSON.parse(script.textContent);
+                            const s = JSON.stringify(d);
+                            const m = s.match(/"(?:views?|viewCount|profileViews|analyticsCount)":(\\d{4,6})/i);
+                            if (m) {
+                                const n = parseInt(m[1]);
+                                if (n >= 1000 && n <= 500000) return String(n);
+                            }
+                        } catch(e) {}
+                    }
+                } catch(e) {}
+                return null;
+            }
+        """)
+        if count_next and str(count_next).isdigit():
+            n = int(count_next)
+            if 1_000 <= n <= 500_000:
+                print(f"[Runner] [{label}] View count via Next.js state: {n}")
+                return str(n), ""
+    except Exception as e:
+        print(f"[Runner] [{label}] Next.js query error: {e}")
+
+    # Strategy A: JS DOM tree walker
+    try:
+        count_js = await page.evaluate("""
+            () => {
+                function clean(s) { return s.replace(/[,. ]/g, ''); }
+                function inRange(n) { return n >= 1000 && n <= 500000; }
+
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT, null
+                );
+                const nodes = [];
+                let node;
+                while ((node = walker.nextNode())) nodes.push(node);
+
+                for (let i = 0; i < nodes.length; i++) {
+                    if (!/profile analytics|profile views|total views/i.test(nodes[i].textContent.trim())) continue;
+                    for (let d = -8; d <= 8; d++) {
+                        if (d === 0) continue;
+                        const idx = i + d;
+                        if (idx < 0 || idx >= nodes.length) continue;
+                        const candidate = clean(nodes[idx].textContent.trim());
+                        if (/^\\d{4,6}$/.test(candidate) && inRange(parseInt(candidate))) {
+                            return candidate;
+                        }
+                    }
+                    let el = nodes[i].parentElement;
+                    for (let up = 0; up < 6 && el; up++, el = el.parentElement) {
+                        const ms = (el.textContent || '').match(/(\\d[\\d,]{3,6})/g) || [];
+                        for (const c of ms) {
+                            const n = parseInt(clean(c));
+                            if (inRange(n)) return String(n);
+                        }
+                    }
+                }
+                for (const link of document.querySelectorAll('[href*="analytics"]')) {
+                    let container = link.parentElement;
+                    for (let up = 0; up < 4 && container; up++, container = container.parentElement) {
+                        const ms = (container.textContent || '').match(/(\\d[\\d,]{3,6})/g) || [];
+                        for (const c of ms) {
+                            const n = parseInt(clean(c));
+                            if (inRange(n)) return String(n);
+                        }
+                    }
+                }
+                return null;
+            }
+        """)
+        if count_js:
+            raw = str(count_js).replace(",", "").replace(" ", "")
+            if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                print(f"[Runner] [{label}] View count via DOM walker: {raw}")
+                return raw, ""
+    except Exception as e:
+        print(f"[Runner] [{label}] DOM walker error: {e}")
+
+    # Strategy B: raw HTML regex
+    try:
+        html = await page.content()
+        for m in re.finditer(
+            r'(\d[\d,]{3,6})[^<]{0,150}analytics|analytics[^<]{0,150}(\d[\d,]{3,6})|views?["\s:]+(\d[\d,]{3,6})',
+            html, re.IGNORECASE,
+        ):
+            raw = (m.group(1) or m.group(2) or m.group(3) or "").replace(",", "")
+            if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                print(f"[Runner] [{label}] View count via raw HTML: {raw}")
+                return raw, ""
+    except Exception as e:
+        print(f"[Runner] [{label}] HTML regex error: {e}")
+
+    # Strategy C: inner_text regex
+    try:
+        page_text = await page.inner_text("body")
+        for pattern in [
+            r'(\d[\d ,]{2,7}\d)\s+profile\s+analytics',
+            r'profile\s+analytics\s+(\d[\d ,]{2,7}\d)',
+            r'(\d[\d ,]{2,7}\d)\s+(?:profile\s+)?views',
+            r'views?[^\d]{0,30}(\d[\d ,]{2,7}\d)',
+        ]:
+            for m in re.finditer(pattern, page_text, re.IGNORECASE):
+                raw = m.group(1).replace(" ", "").replace(",", "")
+                if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
+                    print(f"[Runner] [{label}] View count via text regex: {raw}")
+                    return raw, ""
+    except Exception as e:
+        print(f"[Runner] [{label}] Text regex error: {e}")
+
+    # All strategies failed — build a debug snippet for Notion
+    debug = f"[{label}] no count found. URL={page.url}. "
+    try:
+        page_text = await page.inner_text("body")
+        idx = page_text.lower().find("profile analytics")
+        if idx < 0:
+            idx = page_text.lower().find("analytics")
+        if idx < 0:
+            idx = page_text.lower().find("views")
+        if idx >= 0:
+            snippet = page_text[max(0, idx - 80):idx + 80].replace("\n", " ⏎ ").strip()
+            debug += f"Near marker: '{snippet}'. "
+        else:
+            debug += f"No 'analytics'/'views' marker on page. First 200 chars: '{page_text[:200].replace(chr(10), ' ⏎ ')}'."
+    except Exception as e:
+        debug += f"Could not read page text: {e}. "
+    print(f"[Runner] [{label}] DEBUG: {debug}")
+    return None, debug
+
+
 async def run_check(run_type: str = "US") -> dict:
     """
     Execute one full monitoring run.
@@ -463,194 +630,10 @@ async def run_check(run_type: str = "US") -> dict:
                 await ep_page.wait_for_timeout(3_000)
                 data["ep_url"] = ep_page.url
 
-            # ── Step 5: Scrape view count ───────────────────────────────────
-            try:
-                try:
-                    await ep_page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception:
-                    pass
-                await ep_page.wait_for_timeout(3_000)
-
-                view_count = None
-
-                # ── Strategy 0: Next.js / app state extraction ───────────────
-                # EP uses Next.js. The view count is often embedded in
-                # window.__NEXT_DATA__ before any DOM rendering, making this
-                # the fastest and most reliable method.
-                try:
-                    count_next = await ep_page.evaluate("""
-                        () => {
-                            try {
-                                // Method A: window.__NEXT_DATA__
-                                const nd = window.__NEXT_DATA__;
-                                if (nd) {
-                                    const str = JSON.stringify(nd);
-                                    const keys = [
-                                        '"views":', '"viewCount":', '"profileViews":',
-                                        '"analyticsCount":', '"pageViews":', '"totalViews":',
-                                        '"visitCount":', '"visits":',
-                                    ];
-                                    for (const key of keys) {
-                                        const idx = str.indexOf(key);
-                                        if (idx >= 0) {
-                                            const m = str.slice(idx + key.length).match(/^(\\d{4,6})/);
-                                            if (m) {
-                                                const n = parseInt(m[1]);
-                                                if (n >= 1000 && n <= 500000) return String(n);
-                                            }
-                                        }
-                                    }
-                                }
-                                // Method B: any script tag with JSON containing analytics count
-                                for (const script of document.querySelectorAll('script[type="application/json"]')) {
-                                    try {
-                                        const d = JSON.parse(script.textContent);
-                                        const s = JSON.stringify(d);
-                                        const m = s.match(/"(?:views?|viewCount|profileViews|analyticsCount)":(\\d{4,6})/i);
-                                        if (m) {
-                                            const n = parseInt(m[1]);
-                                            if (n >= 1000 && n <= 500000) return String(n);
-                                        }
-                                    } catch(e) {}
-                                }
-                            } catch(e) {}
-                            return null;
-                        }
-                    """)
-                    if count_next:
-                        raw = str(count_next).strip()
-                        if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
-                            view_count = raw
-                            print(f"[Runner] View count (Next.js state): {view_count}")
-                except Exception as next_err:
-                    print(f"[Runner] Next.js state query failed: {next_err}")
-
-                # ── Strategy A: JS DOM tree walker (most reliable) ───────────
-                # Walks every text node in the document, finds one that says
-                # "Profile Analytics", then checks nearby nodes and parent
-                # elements for a number in the valid range.
-                try:
-                    count_js = await ep_page.evaluate("""
-                        () => {
-                            function clean(s) {
-                                return s.replace(/[,.  ]/g, '');
-                            }
-                            function inRange(n) { return n >= 1000 && n <= 500000; }
-
-                            // Collect all visible text nodes
-                            const walker = document.createTreeWalker(
-                                document.body, NodeFilter.SHOW_TEXT, null
-                            );
-                            const nodes = [];
-                            let node;
-                            while ((node = walker.nextNode())) nodes.push(node);
-
-                            for (let i = 0; i < nodes.length; i++) {
-                                if (!/profile analytics/i.test(nodes[i].textContent.trim())) continue;
-
-                                // Check up to 6 text nodes before and after
-                                for (let d = -6; d <= 6; d++) {
-                                    if (d === 0) continue;
-                                    const idx = i + d;
-                                    if (idx < 0 || idx >= nodes.length) continue;
-                                    const candidate = clean(nodes[idx].textContent.trim());
-                                    if (/^\\d{4,6}$/.test(candidate) && inRange(parseInt(candidate))) {
-                                        return candidate;
-                                    }
-                                }
-
-                                // Walk up 5 ancestor elements and search their full text
-                                let el = nodes[i].parentElement;
-                                for (let up = 0; up < 5 && el; up++, el = el.parentElement) {
-                                    const full = el.textContent || '';
-                                    const ms = full.match(/(\\d[\\d,]{3,6})/g) || [];
-                                    for (const candidate of ms) {
-                                        const n = parseInt(clean(candidate));
-                                        if (inRange(n)) return String(n);
-                                    }
-                                }
-                            }
-
-                            // Fallback: any element whose href contains "analytics"
-                            for (const link of document.querySelectorAll('[href*="analytics"]')) {
-                                let container = link.parentElement;
-                                for (let up = 0; up < 4 && container; up++, container = container.parentElement) {
-                                    const ms = (container.textContent || '').match(/(\\d[\\d,]{3,6})/g) || [];
-                                    for (const c of ms) {
-                                        const n = parseInt(clean(c));
-                                        if (inRange(n)) return String(n);
-                                    }
-                                }
-                            }
-
-                            return null;
-                        }
-                    """)
-                    if count_js:
-                        raw = str(count_js).replace(",", "").replace(" ", "")
-                        if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
-                            view_count = raw
-                            print(f"[Runner] View count (DOM): {view_count}")
-                except Exception as js_err:
-                    print(f"[Runner] JS DOM query failed: {js_err}")
-
-                # ── Strategy B: raw HTML regex ───────────────────────────────
-                # EP may render the count in a data-attribute or structured tag
-                # that inner_text doesn't expose cleanly.
-                if not view_count:
-                    try:
-                        html = await ep_page.content()
-                        for m in re.finditer(
-                            r'(\d[\d,]{3,6})[^<]{0,120}analytics|analytics[^<]{0,120}(\d[\d,]{3,6})',
-                            html, re.IGNORECASE,
-                        ):
-                            raw = (m.group(1) or m.group(2) or "").replace(",", "")
-                            if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
-                                view_count = raw
-                                print(f"[Runner] View count (HTML): {view_count}")
-                                break
-                    except Exception as html_err:
-                        print(f"[Runner] HTML regex failed: {html_err}")
-
-                # ── Strategy C: inner_text regex (original approach) ─────────
-                if not view_count:
-                    try:
-                        page_text = await ep_page.inner_text("body")
-                        for pattern in [
-                            r'(\d[\d ,]{2,7}\d)\s+profile\s+analytics',
-                            r'profile\s+analytics\s+(\d[\d ,]{2,7}\d)',
-                            r'(\d[\d ,]{2,7}\d)[^\n]{0,40}analytics',
-                        ]:
-                            for m in re.finditer(pattern, page_text, re.IGNORECASE):
-                                raw = m.group(1).replace(" ", "").replace(",", "")
-                                if raw.isdigit() and 1_000 <= int(raw) <= 500_000:
-                                    view_count = raw
-                                    print(f"[Runner] View count (text): {view_count}")
-                                    break
-                            if view_count:
-                                break
-                    except Exception as text_err:
-                        print(f"[Runner] Text regex failed: {text_err}")
-
-                if view_count:
-                    data["view_count"] = view_count
-                else:
-                    # ── Full debug dump so the next failure is self-diagnosing
-                    try:
-                        page_text = await ep_page.inner_text("body")
-                        idx = page_text.lower().find("profile analytics")
-                        if idx >= 0:
-                            snippet = page_text[max(0, idx - 200):idx + 100].replace("\n", "↵")
-                            print(f"[Runner] DEBUG near 'profile analytics': ...{snippet}...")
-                        else:
-                            print(f"[Runner] 'PROFILE ANALYTICS' NOT on page. URL: {ep_page.url}")
-                            print(f"[Runner] Page text (800): {page_text[:800].replace(chr(10), '↵')}")
-                    except Exception:
-                        pass
-
-            except Exception as e:
-                data["notes"] += f"View count error: {e}. "
-                print(f"[Runner] View count exception: {e}")
+            # ── Step 5: Scrape view count (first attempt — on profile page) ─
+            view_count, debug_profile = await _scrape_view_count(ep_page, label="profile")
+            if view_count:
+                data["view_count"] = view_count
 
             # ── Step 6: Scrape current season stats ─────────────────────────
             try:
@@ -692,6 +675,7 @@ async def run_check(run_type: str = "US") -> dict:
                 data["notes"] += f"Stats error: {e}. "
 
             # ── Step 7: Click Profile Analytics tab ─────────────────────────
+            debug_analytics = ""
             try:
                 analytics_tab = await ep_page.query_selector(
                     "a:has-text('Profile Analytics'), "
@@ -702,11 +686,11 @@ async def run_check(run_type: str = "US") -> dict:
                     await analytics_tab.scroll_into_view_if_needed()
                     await ep_page.wait_for_timeout(random.randint(600, 1_200))
                     await analytics_tab.click()
-                    await ep_page.wait_for_timeout(4_000)
+                    await ep_page.wait_for_timeout(5_000)
                     data["analytics_opened"] = True
-                    print("[Runner] Analytics tab clicked.")
+                    print(f"[Runner] Analytics tab clicked. Now at: {ep_page.url}")
 
-                    # ── Step 7: Detect paywall ───────────────────────────────
+                    # ── Step 7b: Detect paywall ──────────────────────────────
                     body = await ep_page.inner_text("body")
                     if any(kw in body.lower() for kw in PAYWALL_KEYWORDS):
                         data["blocked"] = True
@@ -714,11 +698,36 @@ async def run_check(run_type: str = "US") -> dict:
                         print("[Runner] Paywall detected.")
                     else:
                         data["notes"] += "Analytics loaded (no paywall). "
+
+                    # ── Step 8: SECOND scrape attempt — on the analytics page
+                    # The view count almost certainly lives here, not on the
+                    # main profile page. This is the critical fix.
+                    if not view_count:
+                        view_count2, debug_analytics = await _scrape_view_count(
+                            ep_page, label="analytics"
+                        )
+                        if view_count2:
+                            view_count = view_count2
+                            data["view_count"] = view_count2
+                            print(f"[Runner] View count captured on analytics page: {view_count2}")
                 else:
                     data["notes"] += "Profile Analytics tab not found. "
                     print("[Runner] Analytics tab not found.")
             except Exception as e:
                 data["notes"] += f"Analytics error: {e}. "
+
+            # ── Step 9: If still no count, write debug info to Notes ────────
+            # This makes the debug snippet visible in Notion so we can finally
+            # see what EP is actually serving without needing Railway logs.
+            if not view_count:
+                combined_debug = ""
+                if debug_profile:
+                    combined_debug += f"PROFILE: {debug_profile} "
+                if debug_analytics:
+                    combined_debug += f"ANALYTICS: {debug_analytics} "
+                if combined_debug:
+                    # Cap at 1500 chars so Notion's rich_text doesn't truncate badly
+                    data["notes"] += f"[DEBUG] {combined_debug[:1500]} "
 
             data["result"] = "Success"
 
