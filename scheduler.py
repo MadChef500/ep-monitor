@@ -191,6 +191,17 @@ def non_us_catchup() -> None:
 def main() -> None:
     print("[Scheduler] Starting EP Monitor scheduler…")
 
+    # Fire one test run immediately on startup, inside the active window.
+    # This gives us an instant scrape every time Railway redeploys, so we
+    # can verify fixes without waiting for the next scheduled slot.
+    _now = datetime.now(ET)
+    if 7 <= _now.hour < 20:
+        print(f"[Scheduler] Startup test run at {_now.strftime('%I:%M %p ET')}.")
+        try:
+            _run_sync("US")
+        except Exception as e:
+            print(f"[Scheduler] Startup test run error: {e}")
+
     # Build today's schedule immediately on startup
     schedule_today()
 
